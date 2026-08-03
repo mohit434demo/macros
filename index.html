@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#6b8f6b" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#32362f" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Macros">
+<title>Macros</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    const stored = (() => { try { return localStorage.getItem("nt.theme"); } catch (e) { return null; } })();
+    const theme = param || stored ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="app-bar">
+  <div class="app-bar-inner">
+    <h1 id="viewTitle">Today</h1>
+    <div class="app-bar-actions">
+      <button id="dateBack"  class="icon-btn" aria-label="Previous day">&#8249;</button>
+      <button id="dateLabel" class="date-chip">Today</button>
+      <button id="dateFwd"   class="icon-btn" aria-label="Next day">&#8250;</button>
+      <button id="themeBtn"  class="icon-btn" aria-label="Toggle theme">&#9789;</button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ================= TODAY ================= -->
+  <section id="view-today" class="view">
+    <div class="card summary">
+      <div class="ring-wrap">
+        <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+          <circle id="ringFill" class="ring-fill" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="ring-center">
+          <div id="kcalLeft" class="ring-num">0</div>
+          <div class="ring-lbl">left</div>
+        </div>
+      </div>
+      <div class="summary-side">
+        <div class="stat"><span id="kcalEaten">0</span><label>eaten</label></div>
+        <div class="stat"><span id="kcalTarget">0</span><label>target</label></div>
+        <div class="stat"><span id="ctpToday">-</span><label>cal/protein</label></div>
+      </div>
+    </div>
+
+    <div class="card macros" id="macroBars"></div>
+
+    <div id="meals"></div>
+
+    <p class="fine-print" id="dayNote"></p>
+  </section>
+
+  <!-- ================= COOKBOOK ================= -->
+  <section id="view-cookbook" class="view" hidden>
+    <div class="search-row">
+      <input id="cbSearch" type="search" placeholder="Search 70 recipes..." autocomplete="off">
+    </div>
+    <div class="chips" id="cbChips"></div>
+    <div class="chips sort-chips" id="cbSort"></div>
+    <p class="hint legend-hint">Badge shows calories per gram of protein. Lower is better on a cut; under 11 is strong.</p>
+    <div id="cbList" class="list"></div>
+  </section>
+
+  <!-- ================= PROGRESS ================= -->
+  <section id="view-progress" class="view" hidden>
+    <div class="card">
+      <h2>Log today's measurements</h2>
+      <div class="field-row">
+        <label>Weight (lb)
+          <input id="inWeight" type="number" inputmode="decimal" step="0.1" placeholder="185.0">
+        </label>
+        <label>Waist (in)
+          <input id="inWaist" type="number" inputmode="decimal" step="0.1" placeholder="36.0">
+        </label>
+      </div>
+      <button id="saveMeasure" class="btn primary full">Save measurements</button>
+      <p class="hint">Weigh in first thing, after the bathroom, before eating. Daily weight is noise; the trend line is the signal.</p>
+    </div>
+
+    <div class="card">
+      <h2>Weight trend</h2>
+      <div id="weightChart" class="chart"></div>
+      <div class="legend"><span class="dot raw"></span>daily <span class="dot avg"></span>7-day average</div>
+    </div>
+
+    <div class="card">
+      <h2>Waist trend</h2>
+      <div id="waistChart" class="chart"></div>
+      <p class="hint">For South Asian men the guideline waist threshold is about 35 in (90 cm), lower than the 40 in used for general populations. If waist is falling while weight stalls, that is recomposition, not a plateau.</p>
+    </div>
+
+    <div class="card">
+      <h2>Progress</h2>
+      <div id="progStats" class="stat-grid"></div>
+    </div>
+
+    <div class="card">
+      <h2>Adaptive maintenance</h2>
+      <div id="tdeeBox"></div>
+      <p class="hint">Calculated from what you actually ate versus how your trend weight actually moved. It gets more accurate the longer you log, and it beats any formula.</p>
+    </div>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section id="view-more" class="view" hidden>
+    <div class="card">
+      <h2>Daily targets</h2>
+      <div class="field-row">
+        <label>Calories <input id="tCal" type="number" inputmode="numeric"></label>
+        <label>Protein (g) <input id="tPro" type="number" inputmode="numeric"></label>
+      </div>
+      <div class="field-row">
+        <label>Fat (g) <input id="tFat" type="number" inputmode="numeric"></label>
+        <label>Carbs (g) <input id="tCarb" type="number" inputmode="numeric"></label>
+      </div>
+      <div class="field-row">
+        <label>Fiber (g) <input id="tFib" type="number" inputmode="numeric"></label>
+        <label>Goal weight (lb) <input id="tGoal" type="number" inputmode="decimal" step="0.5"></label>
+      </div>
+      <button id="saveTargets" class="btn primary full">Save targets</button>
+    </div>
+
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="field-row">
+        <label>Age <input id="pAge" type="number" inputmode="numeric"></label>
+        <label>Height (in) <input id="pHeight" type="number" inputmode="decimal" step="0.5"></label>
+      </div>
+      <label class="block">Activity
+        <select id="pAct">
+          <option value="1.2">Sedentary (desk job, no training)</option>
+          <option value="1.375">Light (train 3 to 4 days)</option>
+          <option value="1.55">Moderate (train 5 to 6 days)</option>
+          <option value="1.725">Very active (daily hard training)</option>
+        </select>
+      </label>
+      <button id="recalc" class="btn full">Recalculate targets from profile</button>
+      <p class="hint" id="calcNote"></p>
+    </div>
+
+    <div class="card">
+      <h2>My foods</h2>
+      <p class="hint">Anything not in the cookbook: protein shakes, restaurant meals, whatever you eat often.</p>
+      <button id="addCustom" class="btn full">Add a custom food</button>
+      <div id="customList" class="list compact"></div>
+    </div>
+
+    <div class="card">
+      <h2>Backup</h2>
+      <p class="hint">Your data lives only on this device. Export every few weeks so a cleared browser cache cannot wipe your history.</p>
+      <button id="exportBtn" class="btn full">Export data (JSON)</button>
+      <button id="importBtn" class="btn full">Import data</button>
+      <input id="importFile" type="file" accept="application/json" hidden>
+      <button id="resetBtn" class="btn danger full">Erase all data</button>
+    </div>
+
+    <p class="fine-print">Recipes from the Stealth Health / Meal Prep Weekly library. Macros are per serving as published.</p>
+  </section>
+
+</main>
+
+<nav class="tabbar">
+  <button class="tab active" data-view="today">
+    <span class="tab-ico">&#9679;</span><span>Today</span>
+  </button>
+  <button class="tab" data-view="cookbook">
+    <span class="tab-ico">&#9635;</span><span>Cookbook</span>
+  </button>
+  <button class="tab" data-view="progress">
+    <span class="tab-ico">&#9650;</span><span>Progress</span>
+  </button>
+  <button class="tab" data-view="more">
+    <span class="tab-ico">&#9881;</span><span>More</span>
+  </button>
+</nav>
+
+<button id="fab" class="fab" aria-label="Add food">+</button>
+
+<!-- ================= SHEETS ================= -->
+<div id="scrim" class="scrim" hidden></div>
+
+<div id="sheetAdd" class="sheet" hidden>
+  <div class="sheet-head">
+    <button class="link" data-close>Cancel</button>
+    <strong>Add food</strong>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <div class="seg" id="mealSeg"></div>
+    <input id="addSearch" type="search" placeholder="Search recipes and foods..." autocomplete="off">
+    <div id="addResults" class="list compact"></div>
+  </div>
+</div>
+
+<div id="sheetPortion" class="sheet" hidden>
+  <div class="sheet-head">
+    <button class="link" data-close>Back</button>
+    <strong>Portion</strong>
+    <span></span>
+  </div>
+  <div class="sheet-body" id="portionBody"></div>
+</div>
+
+<div id="sheetRecipe" class="sheet tall" hidden>
+  <div class="sheet-head">
+    <button class="link" data-close>Close</button>
+    <strong>Recipe</strong>
+    <span></span>
+  </div>
+  <div class="sheet-body" id="recipeBody"></div>
+</div>
+
+<div id="sheetCustom" class="sheet" hidden>
+  <div class="sheet-head">
+    <button class="link" data-close>Cancel</button>
+    <strong>Custom food</strong>
+    <span></span>
+  </div>
+  <div class="sheet-body" id="customBody"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="recipes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

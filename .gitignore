@@ -1,0 +1,5 @@
+# Personal data must never be committed.
+macros-backup-*.json
+shots/
+__pycache__/
+*.pyc
