@@ -9,12 +9,17 @@ estimate.
 
 - **Today** - calorie ring, protein/carb/fat bars, meals split into
   breakfast/lunch/dinner/snack, quick portion scaling (0.5x to 2x or any
-  fraction). Swipe left/right to move between days. A "Quick add" strip repeats
-  your most recent foods in one tap.
+  fraction). A "Quick add" strip repeats your usual foods in one tap. Swipe
+  left/right between days, or tap the date for a month calendar showing which
+  days you logged and how close you were to target.
 - **Earned shortlist** - the Add sheet opens to just the foods you actually eat.
   Anything logged once joins the list automatically, ordered by most recent.
-  Searching always falls through to the full library, and recipes can be marked
+  Searching always falls through to the full library, and items can be marked
   "want to try", "in rotation", or "not for me".
+- **Everyday pantry** - bundled packaged foods (buns, deli meat, condiments,
+  snacks) plus saved meals that combine them. Meal macros are derived from
+  their components, so correcting one component updates every meal using it.
+  Any bundled value can be corrected on-device without a redeploy.
 - **Cookbook** - 70 recipes with full ingredients and instructions, plus a link
   to the original publisher PDF (all 70) and the recipe video (19 of them).
   Filter by rotation status or protein type, sort by calories-per-gram-of-protein,

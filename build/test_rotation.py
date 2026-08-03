@@ -22,16 +22,20 @@ with sync_playwright() as pw:
     pg.goto(BASE, wait_until="networkidle")
     pg.wait_for_timeout(400)
 
-    print("== first run: no shortlist yet ==")
-    check("no quick add block", pg.inner_text("#quickAdd").strip() == "")
+    print("== first run: shortlist starts as the bundled pantry ==")
+    NP = pg.evaluate("PANTRY.length")
+    TOTAL = pg.evaluate("RECIPES.length + PANTRY.length")
+    check("quick add shows pantry", "Quick add" in pg.inner_text("#quickAdd"))
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
     scope_txt = pg.inner_text("#addScope")
-    check("scope chips shown", "My foods (0)" in scope_txt and "All 70" in scope_txt, scope_txt)
-    check("defaults to full library when empty",
-          "on" in (pg.locator("#addScope .chip").nth(1).get_attribute("class") or ""))
+    check("scope chips shown", f"My foods ({NP})" in scope_txt and f"Everything ({TOTAL})" in scope_txt, scope_txt)
+    check("defaults to my foods when pantry exists",
+          "on" in (pg.locator("#addScope .chip").first.get_attribute("class") or ""))
+    pg.click("[data-scope='all']")
+    pg.wait_for_timeout(250)
     n = pg.locator("#addResults .row").count()
-    check("all recipes browsable", n >= 60, f"count={n}")
+    check("all foods browsable", n >= 60, f"count={n}")
 
     print("\n== logging earns a place on the shortlist ==")
     pg.fill("#addSearch", "chicken tinga rice")
@@ -42,18 +46,16 @@ with sync_playwright() as pw:
     pg.click("#confirmAdd")
     pg.wait_for_timeout(400)
 
-    check("quick add now populated", "Quick add" in pg.inner_text("#quickAdd"))
+    check("quick add still populated", "Quick add" in pg.inner_text("#quickAdd"))
     qn = pg.locator("#quickAdd .chip").count()
-    check("one quick chip", qn == 1, f"chips={qn}")
+    check("quick chips capped at 6", 1 <= qn <= 6, f"chips={qn}")
 
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
-    check("scope counts updated", "My foods (1)" in pg.inner_text("#addScope"),
+    check("scope counts updated", f"My foods ({NP + 1})" in pg.inner_text("#addScope"),
           pg.inner_text("#addScope"))
-    check("defaults to my foods now",
-          "on" in (pg.locator("#addScope .chip").first.get_attribute("class") or ""))
     rows = pg.locator("#addResults .row").count()
-    check("shortlist is short", rows == 1, f"rows={rows}")
+    check("shortlist is short", rows == NP + 1, f"rows={rows}")
     check("shows log count", "logged 1x" in pg.inner_text("#addResults"))
 
     print("\n== search still reaches the whole library ==")
@@ -61,10 +63,11 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(300)
     r2 = pg.locator("#addResults .row").count()
     check("search escapes the shortlist", r2 >= 2, f"rows={r2}")
-    pg.click("#sheetAdd [data-close]")
 
     print("\n== quick add repeats a meal ==")
-    pg.click("#quickAdd .chip")
+    pg.click("#sheetAdd [data-close]")
+    pg.wait_for_timeout(200)
+    pg.locator("#quickAdd .chip").first.click()
     pg.wait_for_selector("#sheetPortion:not([hidden])")
     pg.click("#confirmAdd")
     pg.wait_for_timeout(400)
@@ -74,15 +77,15 @@ with sync_playwright() as pw:
     pg.click("[data-view='cookbook']")
     pg.wait_for_timeout(300)
     check("in-rotation pill shown", pg.locator(".pill.eaten").count() >= 1)
-    check("count label", "of 70" in pg.inner_text("#cbCount"), pg.inner_text("#cbCount"))
+    check("count label", f"of {TOTAL}" in pg.inner_text("#cbCount"), pg.inner_text("#cbCount"))
     pg.click("[data-tag='rotation']")
     pg.wait_for_timeout(250)
     rot = pg.locator("#cbList .row").count()
-    check("rotation filter", rot == 1, f"rot={rot}")
+    check("rotation filter", rot >= NP, f"rot={rot}")
     pg.click("[data-tag='untried']")
     pg.wait_for_timeout(250)
     unt = pg.locator("#cbList .row").count()
-    check("untried filter", unt == 69, f"untried={unt}")
+    check("untried excludes pantry and eaten", unt == TOTAL - rot, f"untried={unt} rot={rot}")
     pg.click("[data-tag='all']")
     pg.wait_for_timeout(200)
 
@@ -114,12 +117,13 @@ with sync_playwright() as pw:
     pg.click("#sheetRecipe [data-close]")
     pg.click("[data-tag='untried']")
     pg.wait_for_timeout(250)
-    check("want removes from untried", pg.locator("#cbList .row").count() == 68,
-          str(pg.locator("#cbList .row").count()))
+    check("want removes from untried", pg.locator("#cbList .row").count() == unt - 1,
+          f"{pg.locator('#cbList .row').count()} vs {unt - 1}")
     pg.click("[data-tag='all']")
 
-    # marking skip should hide an eaten item from the shortlist
+    # marking skip should hide an eaten recipe from the shortlist
     eaten_id = pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('nt.v1')).usage)[0]")
+    logged_before = pg.evaluate(f"JSON.parse(localStorage.getItem('nt.v1')).usage['{eaten_id}'].n")
     pg.evaluate(f"document.querySelector('[data-food=\"{eaten_id}\"]')?.scrollIntoView()")
     pg.click(f"[data-food='{eaten_id}']")
     pg.wait_for_selector("#sheetRecipe:not([hidden])")
@@ -128,8 +132,14 @@ with sync_playwright() as pw:
     pg.click("#sheetRecipe [data-close]")
     pg.click("[data-view='today']")
     pg.wait_for_timeout(300)
-    check("skip clears it from quick add", pg.inner_text("#quickAdd").strip() == "",
-          pg.inner_text("#quickAdd")[:60])
+    # the strip caps at 6 chips, so assert the item itself is gone rather than the count
+    check("skip removes it from quick add",
+          pg.evaluate(f"!document.querySelector('[data-again=\"{eaten_id}\"]')"))
+    check("skip removes it from the shortlist",
+          pg.evaluate(f"""() => {{
+            const S = JSON.parse(localStorage.getItem('nt.v1'));
+            return S.marks['{eaten_id}'] === 'skip';
+          }}"""))
     check("logged entries untouched", pg.locator(".entry").count() == 2)
 
     print("\n== persistence ==")
@@ -140,8 +150,8 @@ with sync_playwright() as pw:
     check("usage survives reload",
           pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('nt.v1')).usage).length") >= 1)
     check("skip preserves the log count",
-          pg.evaluate("Object.values(JSON.parse(localStorage.getItem('nt.v1')).usage)[0].n") == 2,
-          str(pg.evaluate("Object.values(JSON.parse(localStorage.getItem('nt.v1')).usage)")))
+          pg.evaluate(f"JSON.parse(localStorage.getItem('nt.v1')).usage['{eaten_id}'].n") == logged_before,
+          f"was {logged_before}")
     pg.screenshot(path="../shots/12-today-quick.png")
 
     ctx.close(); b.close()

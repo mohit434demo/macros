@@ -10,9 +10,10 @@ const DEFAULTS = {
   profile: { age: 31, heightIn: 67, sex: "m", act: 1.375 },
   log: {},        // "YYYY-MM-DD" -> [{id,name,meal,qty,cal,p,c,f,src}]
   measures: {},   // "YYYY-MM-DD" -> {w: lb, waist: in}
-  custom: [],     // [{id,n,cal,p,c,f,unit}]
+  custom: [],     // [{id,n,cal,p,c,f,unit,parts?}]
   usage: {},      // foodId -> {n: times logged, last: "YYYY-MM-DD"}
   marks: {},      // foodId -> "rotation" | "want" | "skip"
+  edits: {},      // bundled foodId -> {n?,unit?,cal,p,c,f} user corrections
 };
 
 let S = load();
@@ -30,6 +31,7 @@ function load() {
       custom:   parsed.custom   || [],
       usage:    parsed.usage    || {},
       marks:    parsed.marks    || {},
+      edits:    parsed.edits    || {},
     };
   } catch (e) {
     console.warn("load failed", e);
@@ -92,15 +94,64 @@ function totals(k = curDate) {
 }
 
 // ---------------------------------------------------------------- food index
-function foodList() {
+/* A custom entry may be a simple food or a "meal": a named combination of other
+   foods with quantities. Meal macros are derived from their parts every time,
+   so correcting a component fixes every meal that uses it. Parts may only
+   reference simple foods, which keeps this non-recursive. */
+function simpleFoods() {
   const out = RECIPES.map(r => ({
     id: r.id, n: r.n, cal: r.cal, p: r.p, c: r.c, f: r.f,
     unit: "serving", sv: r.sv, ctp: r.ctp, tags: r.tags, src: "recipe", ref: r,
   }));
+  for (const b of (typeof PANTRY !== "undefined" ? PANTRY : [])) {
+    if (b.parts && b.parts.length) continue;
+    out.push({ id: b.id, n: b.n, cal: b.cal, p: b.p, c: b.c, f: b.f,
+               unit: b.unit || "serving", tags: b.tags || ["pantry"], src: "pantry" });
+  }
   for (const c of S.custom) {
+    if (c.parts && c.parts.length) continue;
     out.push({ id: c.id, n: c.n, cal: c.cal, p: c.p, c: c.c, f: c.f,
-               unit: c.unit || "serving", ctp: c.p ? round(c.cal / c.p, 1) : null,
-               tags: ["mine"], src: "custom" });
+               unit: c.unit || "serving", tags: ["mine"], src: "custom" });
+  }
+  // user corrections win over bundled values
+  return out.map(f => {
+    const e = S.edits[f.id];
+    if (!e) return withCtp(f);
+    return withCtp({ ...f, ...e, edited: true });
+  });
+}
+function withCtp(f) {
+  f.ctp = f.p ? round(f.cal / f.p, 1) : null;
+  return f;
+}
+
+function mealTotals(parts, base) {
+  const idx = base || new Map(simpleFoods().map(f => [f.id, f]));
+  const t = { cal: 0, p: 0, c: 0, f: 0, missing: 0 };
+  for (const p of parts) {
+    const f = idx.get(p.id);
+    if (!f) { t.missing++; continue; }
+    t.cal += f.cal * p.qty; t.p += f.p * p.qty;
+    t.c += f.c * p.qty;     t.f += f.f * p.qty;
+  }
+  t.cal = round(t.cal); t.p = round(t.p, 1); t.c = round(t.c, 1); t.f = round(t.f, 1);
+  return t;
+}
+
+function foodList() {
+  const simple = simpleFoods();
+  const idx = new Map(simple.map(f => [f.id, f]));
+  const out = simple.slice();
+  const combos = [
+    ...(typeof PANTRY !== "undefined" ? PANTRY : []).filter(b => b.parts && b.parts.length)
+      .map(b => ({ ...b, src: "pantry" })),
+    ...S.custom.filter(c => c.parts && c.parts.length).map(c => ({ ...c, src: "custom" })),
+  ];
+  for (const c of combos) {
+    const t = mealTotals(c.parts, idx);
+    out.push({ id: c.id, n: c.n, cal: t.cal, p: t.p, c: t.c, f: t.f,
+               unit: c.unit || "meal", ctp: t.p ? round(t.cal / t.p, 1) : null,
+               tags: c.tags || ["mine", "meal"], src: c.src, parts: c.parts });
   }
   return out;
 }
@@ -109,10 +160,14 @@ function findFood(id) { return foodList().find(f => f.id === id); }
 /* The shortlist is earned: anything logged once joins it automatically.
    Explicit marks let you pin something you have not eaten yet, or hide
    something you tried and did not like. */
+function isPantry(id) {
+  return typeof PANTRY !== "undefined" && PANTRY.some(b => b.id === id);
+}
 function inRotation(id) {
   if (S.marks[id] === "skip") return false;
   if (S.marks[id] === "rotation") return true;
-  return (S.usage[id]?.n || 0) > 0;
+  if ((S.usage[id]?.n || 0) > 0) return true;
+  return isPantry(id);   // everyday staples start in your list
 }
 function rotationList() {
   return foodList()
@@ -120,8 +175,10 @@ function rotationList() {
     .sort((a, b) => {
       const ua = S.usage[a.id] || { n: 0, last: "" };
       const ub = S.usage[b.id] || { n: 0, last: "" };
-      return (ub.last || "").localeCompare(ua.last || "") || ub.n - ua.n
-             || a.n.localeCompare(b.n);
+      // saved meals first, then most recently eaten, then most frequent
+      const ma = a.parts ? 1 : 0, mb = b.parts ? 1 : 0;
+      return mb - ma || (ub.last || "").localeCompare(ua.last || "")
+             || ub.n - ua.n || a.n.localeCompare(b.n);
     });
 }
 function noteUsage(id) {
@@ -226,14 +283,15 @@ function renderToday() {
 // ---------------------------------------------------------------- COOKBOOK
 let cbTag = "all";
 let cbSort = "name";
-const TAGS = ["all", "rotation", "untried", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
-const TAG_LABEL = { all: "All", rotation: "My rotation", untried: "Not tried yet", mine: "My foods" };
+const TAGS = ["all", "rotation", "untried", "pantry", "meal", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
+const TAG_LABEL = { all: "All", rotation: "My rotation", untried: "Not tried yet",
+                    mine: "My foods", pantry: "Everyday", meal: "Saved meals" };
 const SORTS = [["name", "A-Z"], ["ctp", "Best protein ratio"], ["cal", "Fewest calories"], ["p", "Most protein"]];
 
 function statusOf(id) {
   if (S.marks[id] === "skip") return "skip";
   if ((S.usage[id]?.n || 0) > 0) return "eaten";
-  if (S.marks[id] === "rotation") return "rotation";
+  if (S.marks[id] === "rotation" || isPantry(id)) return "rotation";
   if (S.marks[id] === "want") return "want";
   return "new";
 }
@@ -267,11 +325,12 @@ function renderCookbook() {
   $("#cbList").innerHTML = list.length ? list.map(f => {
     const st = statusOf(f.id);
     const times = S.usage[f.id]?.n || 0;
+    const unit = f.src === "recipe" ? "" : ` / ${esc(f.unit)}`;
     return `<button class="row" data-food="${esc(f.id)}">
       <span class="r-main">
         <span class="r-name">${esc(f.n)}</span>
-        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${times ? ` &middot; logged ${times}x` : ""}</span>
-        ${STATUS_PILL[st]}
+        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${unit}${times ? ` &middot; logged ${times}x` : ""}</span>
+        ${STATUS_PILL[st]}${f.parts ? `<span class="pill want">Meal</span>` : ""}
       </span>
       <span class="r-icons">${f.ref?.vid ? `<span class="mini" title="Has video">&#9654;</span>` : ""}</span>
       <span class="badge ${f.ctp && f.ctp <= 11 ? "good" : ""}">${f.ctp ?? "-"}</span>
@@ -418,14 +477,18 @@ function renderMore() {
   $("#pAge").value = p.age; $("#pHeight").value = p.heightIn;
   $("#pAct").value = String(p.act);
 
-  $("#customList").innerHTML = S.custom.length ? S.custom.map(c => `
-    <div class="row">
+  $("#customList").innerHTML = S.custom.length ? S.custom.map(c => {
+    const f = foodList().find(x => x.id === c.id) || c;
+    const isMeal = c.parts && c.parts.length;
+    return `<button class="row" data-editcustom="${esc(c.id)}">
       <span class="r-main">
         <span class="r-name">${esc(c.n)}</span>
-        <span class="r-sub">${c.cal} cal &middot; ${c.p}p ${c.c}c ${c.f}f per ${esc(c.unit || "serving")}</span>
+        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f per ${esc(c.unit || "serving")}${
+          isMeal ? ` &middot; ${c.parts.length} items` : ""}</span>
       </span>
-      <button class="del" data-delcustom="${esc(c.id)}" aria-label="Remove">&times;</button>
-    </div>`).join("") : `<p class="hint">No custom foods yet.</p>`;
+      ${isMeal ? `<span class="pill eaten">Meal</span>` : ""}
+    </button>`;
+  }).join("") : `<p class="hint">No custom foods yet.</p>`;
 }
 
 function recalcTargets() {
@@ -454,9 +517,18 @@ function openSheet(id) {
   document.body.style.overflow = "hidden";
 }
 function closeSheets() {
+  // backing out of the component picker returns to the meal being built
+  if (partPicker) {
+    partPicker = false;
+    $$(".sheet").forEach(s => { s.hidden = true; });
+    renderCustom();
+    openSheet("sheetCustom");
+    return;
+  }
   $$(".sheet").forEach(s => { s.hidden = true; });
   $("#scrim").hidden = true;
   document.body.style.overflow = "";
+  editingCustom = null;
 }
 
 let addScope = "mine";   // "mine" = earned shortlist, "all" = full library
@@ -498,13 +570,13 @@ function renderAddResults() {
 
   $("#addScope").innerHTML = `
     <button class="chip ${addScope === "mine" ? "on" : ""}" data-scope="mine">My foods (${rot.length})</button>
-    <button class="chip ${addScope === "all" ? "on" : ""}" data-scope="all">All ${RECIPES.length} recipes</button>`;
+    <button class="chip ${addScope === "all" ? "on" : ""}" data-scope="all">Everything (${foodList().length})</button>`;
 
   // searching always falls back to the full library so nothing is unreachable
   const scope = (addScope === "all" || q) ? foodList() : rot;
   const list = searchFoods(q, scope).slice(0, 60);
   $("#addSearch").placeholder = addScope === "mine" && !q
-    ? "Search all 70 recipes..." : "Search recipes and foods...";
+    ? "Search everything..." : "Search recipes and foods...";
 
   if (!list.length) {
     $("#addResults").innerHTML = `<p class="empty">No match.<br>Add it under More &rsaquo; My foods.</p>`;
@@ -516,7 +588,7 @@ function renderAddResults() {
   }
   html += list.map(f => foodRow(f)).join("");
   if (addScope === "mine" && !q) {
-    html += `<button class="add-line" data-scope="all" style="margin-top:8px">Browse all ${RECIPES.length} recipes</button>`;
+    html += `<button class="add-line" data-scope="all" style="margin-top:8px">Browse everything</button>`;
   }
   $("#addResults").innerHTML = html;
 }
@@ -532,11 +604,14 @@ function openPortion(id) {
 function renderPortion() {
   const f = portionFood, q = portionQty;
   const mk = (v, l) => `<div><b>${round(f[v] * q, v === "cal" ? 0 : 1)}</b><small>${l}</small></div>`;
+  const partsNote = f.parts && f.parts.length
+    ? `<p class="hint">Contains ${f.parts.length} item${f.parts.length > 1 ? "s" : ""}.</p>` : "";
   $("#portionBody").innerHTML = `
     <h3>${esc(f.n)}</h3>
     <p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>
-    <div class="seg">${MEALS.map(m =>
-      `<button class="${m === pendingMeal ? "on" : ""}" data-meal="${m}">${m}</button>`).join("")}</div>
+    ${partsNote}
+    ${partPicker ? "" : `<div class="seg">${MEALS.map(m =>
+      `<button class="${m === pendingMeal ? "on" : ""}" data-meal="${m}">${m}</button>`).join("")}</div>`}
     <div class="qty-row">
       <button data-q="-">&minus;</button>
       <input id="qtyIn" type="number" inputmode="decimal" step="0.25" min="0.25" value="${q}">
@@ -546,11 +621,21 @@ function renderPortion() {
       ${[0.5, 1, 1.5, 2].map(v => `<button class="chip ${v === q ? "on" : ""}" data-setq="${v}">${v}x</button>`).join("")}
     </div>
     <div class="preview">${mk("cal", "cal")}${mk("p", "protein")}${mk("c", "carbs")}${mk("f", "fat")}</div>
-    <button class="btn primary full" id="confirmAdd">Add to ${pendingMeal.toLowerCase()}</button>
-    ${f.src === "recipe" ? `<button class="btn full" id="viewRecipe">View recipe</button>` : ""}`;
+    <button class="btn primary full" id="confirmAdd">${partPicker ? "Add to meal" : `Add to ${pendingMeal.toLowerCase()}`}</button>
+    ${f.src === "recipe" && !partPicker ? `<button class="btn full" id="viewRecipe">View recipe</button>` : ""}`;
 }
 function commitAdd() {
   const f = portionFood, q = Number(portionQty) || 1;
+  if (partPicker) {
+    customParts.push({ id: f.id, qty: round(q, 2) });
+    partPicker = false;
+    // return to the meal builder without running the full close (which would
+    // clear editingCustom and lose track of which food is being edited)
+    $$(".sheet").forEach(s => { s.hidden = true; });
+    renderCustom();
+    openSheet("sheetCustom");
+    return;
+  }
   const list = S.log[curDate] || (S.log[curDate] = []);
   list.push({
     fid: f.id, name: f.n, meal: pendingMeal, qty: round(q, 2),
@@ -560,6 +645,40 @@ function commitAdd() {
   noteUsage(f.id);
   save(); closeSheets(); go("today"); renderToday();
   toast(`Added to ${pendingMeal.toLowerCase()}`);
+}
+
+function openPantry(id) {
+  const f = findFood(id);
+  if (!f) return;
+  const idx = new Map(simpleFoods().map(x => [x.id, x]));
+  const parts = f.parts ? f.parts.map(p => {
+    const c = idx.get(p.id);
+    return `<div class="entry">
+      <div class="e-main">
+        <div class="e-name">${esc(c ? c.n : "(missing)")}</div>
+        <div class="e-sub">${p.qty}x${c ? ` &middot; ${round(c.cal * p.qty)} cal, ${round(c.p * p.qty, 1)}p` : ""}</div>
+      </div>
+    </div>`;
+  }).join("") : "";
+
+  $("#recipeBody").innerHTML = `
+    <h3>${esc(f.n)}</h3>
+    <p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}g protein, ${f.c}g carbs, ${f.f}g fat${
+      f.edited ? " (your corrected values)" : ""}</p>
+    <div class="preview">
+      <div><b>${f.cal}</b><small>cal</small></div>
+      <div><b>${f.p}</b><small>protein</small></div>
+      <div><b>${f.c}</b><small>carbs</small></div>
+      <div><b>${f.f}</b><small>fat</small></div>
+    </div>
+    <button class="btn primary full" data-logthis="${esc(f.id)}">Log this</button>
+    ${f.parts ? `<h3>What's in it</h3><div class="list compact">${parts}</div>` : ""}
+    <button class="btn full" data-editfood="${esc(f.id)}">Correct these numbers</button>
+    <div class="mark-row">
+      <button class="chip ${S.marks[f.id] === "rotation" || (S.usage[f.id]?.n || 0) > 0 ? "on" : ""}" data-mark="rotation:${esc(f.id)}">In rotation</button>
+      <button class="chip ${S.marks[f.id] === "skip" ? "on" : ""}" data-mark="skip:${esc(f.id)}">Hide</button>
+    </div>`;
+  openSheet("sheetRecipe");
 }
 
 function openRecipe(id) {
@@ -593,20 +712,157 @@ function openRecipe(id) {
   openSheet("sheetRecipe");
 }
 
-function openCustom() {
+/* Bundled pantry items ship with the app but must stay correctable, since a
+   label number can be wrong or a product can be reformulated. */
+function openEditFood(id) {
+  const f = findFood(id);
+  if (!f) return;
+  const e = S.edits[id] || {};
   $("#customBody").innerHTML = `
-    <label class="block">Name <input id="cName" placeholder="Whey shake"></label>
-    <label class="block">Unit <input id="cUnit" placeholder="scoop, bowl, serving" value="serving"></label>
+    <h3>Correct ${esc(f.n)}</h3>
+    <p class="hint">Per ${esc(f.unit)}. These values replace the built-in ones on this device only.</p>
     <div class="field-row">
-      <label>Calories <input id="cCal" type="number" inputmode="numeric"></label>
-      <label>Protein (g) <input id="cP" type="number" inputmode="decimal"></label>
+      <label>Calories <input id="eCal" type="number" inputmode="numeric" value="${f.cal}"></label>
+      <label>Protein (g) <input id="eP" type="number" inputmode="decimal" value="${f.p}"></label>
     </div>
     <div class="field-row">
-      <label>Carbs (g) <input id="cC" type="number" inputmode="decimal"></label>
-      <label>Fat (g) <input id="cF" type="number" inputmode="decimal"></label>
+      <label>Carbs (g) <input id="eC" type="number" inputmode="decimal" value="${f.c}"></label>
+      <label>Fat (g) <input id="eF" type="number" inputmode="decimal" value="${f.f}"></label>
     </div>
-    <button class="btn primary full" id="saveCustom">Save food</button>`;
+    <button class="btn primary full" data-saveedit="${esc(id)}">Save correction</button>
+    ${Object.keys(e).length ? `<button class="btn full" data-resetedit="${esc(id)}">Reset to built-in values</button>` : ""}`;
   openSheet("sheetCustom");
+}
+
+let customMode = "single";   // "single" | "meal"
+let customParts = [];        // [{id, qty}] while building a meal
+let editingCustom = null;
+let customDraft = {};        // survives re-renders (adding a component, mode switch)
+
+function openCustom(id) {
+  editingCustom = id || null;
+  const c = id ? S.custom.find(x => x.id === id) : null;
+  customMode = c && c.parts && c.parts.length ? "meal" : "single";
+  customParts = c && c.parts ? c.parts.map(p => ({ ...p })) : [];
+  customDraft = c
+    ? { n: c.n, unit: c.unit || "", cal: c.cal, p: c.p, c: c.c, f: c.f }
+    : { n: "", unit: "", cal: "", p: "", c: "", f: "" };
+  renderCustom();
+  openSheet("sheetCustom");
+}
+
+/* The sheet re-renders when you switch modes or add a component, so pull
+   whatever is typed into the draft first or it would be lost. */
+function syncCustomDraft() {
+  const get = sel => { const el = $(sel); return el ? el.value : undefined; };
+  const map = { n: "#cName", unit: "#cUnit", cal: "#cCal", p: "#cP", c: "#cC", f: "#cF" };
+  for (const [k, sel] of Object.entries(map)) {
+    const v = get(sel);
+    if (v !== undefined) customDraft[k] = v;
+  }
+}
+
+function renderCustom() {
+  const d = customDraft;
+  const defUnit = customMode === "meal" ? "meal" : "serving";
+  const unitV = d.unit || defUnit;
+
+  const single = `
+    <div class="field-row">
+      <label>Calories <input id="cCal" type="number" inputmode="numeric" value="${esc(d.cal ?? "")}"></label>
+      <label>Protein (g) <input id="cP" type="number" inputmode="decimal" value="${esc(d.p ?? "")}"></label>
+    </div>
+    <div class="field-row">
+      <label>Carbs (g) <input id="cC" type="number" inputmode="decimal" value="${esc(d.c ?? "")}"></label>
+      <label>Fat (g) <input id="cF" type="number" inputmode="decimal" value="${esc(d.f ?? "")}"></label>
+    </div>`;
+
+  const idx = new Map(simpleFoods().map(f => [f.id, f]));
+  const t = mealTotals(customParts, idx);
+  const partRows = customParts.length ? customParts.map((p, i) => {
+    const f = idx.get(p.id);
+    return `<div class="entry">
+      <div class="e-main">
+        <div class="e-name">${esc(f ? f.n : "(missing food)")}</div>
+        <div class="e-sub">${p.qty}x${f ? ` &middot; ${round(f.cal * p.qty)} cal, ${round(f.p * p.qty, 1)}p` : ""}</div>
+      </div>
+      <button class="del" data-delpart="${i}" aria-label="Remove">&times;</button>
+    </div>`;
+  }).join("") : `<p class="hint">Nothing added yet.</p>`;
+
+  const meal = `
+    <div class="list compact">${partRows}</div>
+    <button class="add-line" id="addPart" style="margin-top:8px">+ Add a component</button>
+    <div class="preview">
+      <div><b>${t.cal}</b><small>cal</small></div>
+      <div><b>${t.p}</b><small>protein</small></div>
+      <div><b>${t.c}</b><small>carbs</small></div>
+      <div><b>${t.f}</b><small>fat</small></div>
+    </div>`;
+
+  $("#customBody").innerHTML = `
+    <div class="seg" style="grid-template-columns:1fr 1fr">
+      <button class="${customMode === "single" ? "on" : ""}" data-cmode="single">Single food</button>
+      <button class="${customMode === "meal" ? "on" : ""}" data-cmode="meal">Meal (combine)</button>
+    </div>
+    <label class="block">Name <input id="cName" placeholder="${customMode === "meal" ? "Sandwich meal" : "Whey shake"}" value="${esc(d.n || "")}"></label>
+    <label class="block">Unit <input id="cUnit" value="${esc(unitV)}"></label>
+    ${customMode === "meal" ? meal : single}
+    <button class="btn primary full" id="saveCustom">${editingCustom ? "Save changes" : "Save"}</button>
+    ${editingCustom ? `<button class="btn danger full" data-delcustom="${esc(editingCustom)}">Delete</button>` : ""}
+    ${customMode === "meal" ? `<p class="hint">Macros update automatically if you later correct one of the components.</p>` : ""}`;
+}
+
+/* Picking a component reuses the Add sheet in a special mode. */
+let partPicker = false;
+function openPartPicker() {
+  syncCustomDraft();
+  partPicker = true;
+  addScope = "all";
+  $("#mealSeg").innerHTML = "";
+  $("#addSearch").value = "";
+  renderAddResults();
+  $("#sheetCustom").hidden = true;
+  openSheet("sheetAdd");
+}
+
+// ---------------------------------------------------------------- calendar
+let calMonth = null;   // Date pinned to the 1st of the shown month
+
+function openCal() {
+  const d = parseKey(curDate);
+  calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+  renderCal();
+  openSheet("sheetCal");
+}
+function renderCal() {
+  $("#calMonth").textContent = calMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const tk = todayKey();
+
+  let html = "";
+  for (let i = 0; i < first; i++) html += `<span class="cal-cell blank"></span>`;
+  for (let d = 1; d <= days; d++) {
+    const k = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const cal = (S.log[k] || []).reduce((s, e) => s + e.cal, 0);
+    const future = k > tk;
+    const pct = S.targets.cal ? clamp(cal / S.targets.cal, 0, 1) : 0;
+    const cls = [
+      "cal-cell",
+      k === curDate ? "sel" : "",
+      k === tk ? "today" : "",
+      future ? "future" : "",
+      cal ? "has" : "",
+    ].filter(Boolean).join(" ");
+    const ring = cal
+      ? `<i class="cal-ring" style="--p:${round(pct * 100)}%;${cal > S.targets.cal ? "--rc:var(--cp-danger);" : ""}"></i>`
+      : "";
+    html += `<button class="${cls}" ${future ? "disabled" : `data-day="${k}"`}>${ring}<b>${d}</b>${
+      S.measures[k]?.w ? `<i class="cal-dot w"></i>` : ""}</button>`;
+  }
+  $("#calGrid").innerHTML = html;
 }
 
 // ---------------------------------------------------------------- nav
@@ -628,14 +884,14 @@ function go(view) {
 function setDate(k) {
   if (k > todayKey()) return;
   curDate = k;
-  $("#dateLabel").textContent = prettyDate(k);
+  $("#dateLabel").innerHTML = esc(prettyDate(k)) + ' <span class="caret">&#9662;</span>';
   if (curView === "today") renderToday();
   if (curView === "progress") renderProgress();
 }
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again]");
+  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit]");
   if (!el) return;
   const d = el.dataset;
 
@@ -656,7 +912,13 @@ document.addEventListener("click", ev => {
   }
   if (d.tag) { cbTag = d.tag; return renderCookbook(); }
   if (d.sort) { cbSort = d.sort; return renderCookbook(); }
-  if (d.food) { const f = findFood(d.food); return f && f.src === "recipe" ? openRecipe(d.food) : openPortion(d.food); }
+  if (d.food) {
+    const f = findFood(d.food);
+    if (!f) return;
+    if (f.src === "recipe") return openRecipe(d.food);
+    if (f.src === "pantry") return openPantry(d.food);
+    return openPortion(d.food);
+  }
   if (d.pick) return openPortion(d.pick);
   if (d.logthis) { closeSheets(); return openPortion(d.logthis); }
   if (d.meal) {
@@ -669,14 +931,34 @@ document.addEventListener("click", ev => {
   if (d.q) { portionQty = Math.max(0.25, round(portionQty + (d.q === "+" ? 0.25 : -0.25), 2)); return renderPortion(); }
   if (d.addmeal) return openAdd(d.addmeal);
   if (d.again) { pendingMeal = guessMeal(); return openPortion(d.again); }
+  if (d.day) { setDate(d.day); closeSheets(); return; }
   if (d.del !== undefined) {
     S.log[curDate].splice(Number(d.del), 1);
     if (!S.log[curDate].length) delete S.log[curDate];
     save(); return renderToday();
   }
+  if (d.editfood) { closeSheets(); return openEditFood(d.editfood); }
+  if (d.saveedit) {
+    S.edits[d.saveedit] = {
+      cal: +$("#eCal").value || 0, p: +$("#eP").value || 0,
+      c: +$("#eC").value || 0, f: +$("#eF").value || 0,
+    };
+    save(); closeSheets(); renderToday(); renderMore(); toast("Corrected");
+    return;
+  }
+  if (d.resetedit) {
+    delete S.edits[d.resetedit];
+    save(); closeSheets(); renderToday(); renderMore(); toast("Reset to built-in");
+    return;
+  }
+  if (d.cmode) { syncCustomDraft(); customMode = d.cmode; return renderCustom(); }
+  if (d.delpart !== undefined) { syncCustomDraft(); customParts.splice(Number(d.delpart), 1); return renderCustom(); }
+  if (d.editcustom) return openCustom(d.editcustom);
   if (d.delcustom) {
     S.custom = S.custom.filter(c => c.id !== d.delcustom);
-    save(); return renderMore();
+    delete S.usage[d.delcustom]; delete S.marks[d.delcustom];
+    save(); closeSheets(); renderMore(); toast("Deleted");
+    return;
   }
 });
 
@@ -705,7 +987,10 @@ document.addEventListener("click", ev => {
   if (id === "viewRecipe") { closeSheets(); return openRecipe(portionFood.id); }
   if (id === "dateBack") return setDate(shiftKey(curDate, -1));
   if (id === "dateFwd")  return setDate(shiftKey(curDate, 1));
-  if (id === "dateLabel") return setDate(todayKey());
+  if (id === "dateLabel") return openCal();
+  if (id === "calPrev") { calMonth.setMonth(calMonth.getMonth() - 1); return renderCal(); }
+  if (id === "calNext") { calMonth.setMonth(calMonth.getMonth() + 1); return renderCal(); }
+  if (id === "calToday") { setDate(todayKey()); closeSheets(); return; }
   if (id === "themeBtn") {
     const cur = document.documentElement.getAttribute("data-theme");
     const next = cur === "dark" ? "light" : "dark";
@@ -740,16 +1025,32 @@ document.addEventListener("click", ev => {
     save(); return recalcTargets();
   }
   if (id === "addCustom") return openCustom();
+  if (id === "addPart") return openPartPicker();
   if (id === "saveCustom") {
-    const n = $("#cName").value.trim();
+    syncCustomDraft();
+    const n = (customDraft.n || "").trim();
     if (!n) return toast("Name it first");
-    S.custom.push({
-      id: "c" + Date.now().toString(36), n,
-      unit: $("#cUnit").value.trim() || "serving",
-      cal: +$("#cCal").value || 0, p: +$("#cP").value || 0,
-      c: +$("#cC").value || 0, f: +$("#cF").value || 0,
-    });
-    save(); closeSheets(); renderMore(); toast("Food saved");
+    const unit = (customDraft.unit || "").trim() || (customMode === "meal" ? "meal" : "serving");
+    if (customMode === "meal" && !customParts.length) return toast("Add at least one component");
+
+    const rec = editingCustom
+      ? S.custom.find(c => c.id === editingCustom)
+      : (S.custom[S.custom.push({ id: "c" + Date.now().toString(36) }) - 1]);
+    rec.n = n; rec.unit = unit;
+    if (customMode === "meal") {
+      rec.parts = customParts.map(p => ({ ...p }));
+      const t = mealTotals(rec.parts);
+      Object.assign(rec, { cal: t.cal, p: t.p, c: t.c, f: t.f });
+    } else {
+      delete rec.parts;
+      Object.assign(rec, {
+        cal: +customDraft.cal || 0, p: +customDraft.p || 0,
+        c: +customDraft.c || 0, f: +customDraft.f || 0,
+      });
+    }
+    save(); closeSheets(); renderMore(); renderToday();
+    toast(editingCustom ? "Saved" : "Food saved");
+    editingCustom = null;
     return;
   }
   if (id === "exportBtn") {
@@ -802,7 +1103,7 @@ document.addEventListener("touchend", e => {
 }, { passive: true });
 
 // ---------------------------------------------------------------- boot
-$("#cbSearch").setAttribute("placeholder", `Search ${RECIPES.length} recipes...`);
+$("#cbSearch").setAttribute("placeholder", `Search ${foodList().length} foods...`);
 setDate(todayKey());
 go("today");
 

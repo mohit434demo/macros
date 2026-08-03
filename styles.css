@@ -104,6 +104,7 @@ h3 { font-size: 0.9rem; margin: 14px 0 6px; font-weight: 650; }
   color: var(--cp-text); border-radius: 0.625rem; padding: 6px 10px;
   font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
+.date-chip .caret { color: var(--cp-text-muted); font-size: 0.7rem; }
 
 /* ---------- layout ---------- */
 main { max-width: 720px; margin: 0 auto; padding: 12px 14px 24px; }
@@ -350,6 +351,41 @@ label.block { display: grid; gap: 4px; margin-bottom: 8px; }
   padding: 10px 16px; border-radius: 999px; font-size: 0.82rem; font-weight: 600;
   box-shadow: var(--cp-shadow); animation: rise .18s ease;
 }
+
+/* ---------- calendar ---------- */
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cal-head strong { font-size: 0.95rem; }
+.cal-dow {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  font-size: 0.68rem; color: var(--cp-text-muted); text-align: center; margin-bottom: 4px;
+}
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell {
+  position: relative; aspect-ratio: 1; border: none; background: transparent;
+  border-radius: 50%; color: var(--cp-text); font: inherit; font-size: 0.82rem;
+  cursor: pointer; display: grid; place-items: center;
+}
+.cal-cell.blank { pointer-events: none; }
+.cal-cell b { position: relative; z-index: 2; font-weight: 500; }
+.cal-cell.has b { font-weight: 700; }
+.cal-cell.today b { color: var(--cp-accent); font-weight: 700; }
+.cal-cell.future { color: var(--cp-text-soft); opacity: 0.4; cursor: default; }
+.cal-cell.sel { background: var(--cp-accent); }
+.cal-cell.sel b { color: var(--cp-accent-fg); }
+.cal-cell:active:not(.future):not(.blank) { background: var(--cp-surface-soft); }
+.cal-ring {
+  position: absolute; inset: 3px; border-radius: 50%; z-index: 1;
+  background: conic-gradient(var(--rc, var(--cp-accent)) var(--p), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 62%, #000 64%);
+  mask: radial-gradient(circle, transparent 62%, #000 64%);
+  opacity: 0.85;
+}
+.cal-cell.sel .cal-ring { opacity: 0.5; }
+.cal-dot {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--cp-fiber); z-index: 2;
+}
+.cal-cell.sel .cal-dot { background: var(--cp-accent-fg); }
 
 @media (min-width: 560px) {
   .stat-grid { grid-template-columns: repeat(4, 1fr); }
