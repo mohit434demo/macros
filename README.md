@@ -9,10 +9,16 @@ estimate.
 
 - **Today** - calorie ring, protein/carb/fat bars, meals split into
   breakfast/lunch/dinner/snack, quick portion scaling (0.5x to 2x or any
-  fraction). Swipe left/right to move between days.
-- **Cookbook** - 70 recipes with full ingredients and instructions. Filter by
-  protein type or format, sort by calories-per-gram-of-protein, calories, or
-  protein.
+  fraction). Swipe left/right to move between days. A "Quick add" strip repeats
+  your most recent foods in one tap.
+- **Earned shortlist** - the Add sheet opens to just the foods you actually eat.
+  Anything logged once joins the list automatically, ordered by most recent.
+  Searching always falls through to the full library, and recipes can be marked
+  "want to try", "in rotation", or "not for me".
+- **Cookbook** - 70 recipes with full ingredients and instructions, plus a link
+  to the original publisher PDF (all 70) and the recipe video (19 of them).
+  Filter by rotation status or protein type, sort by calories-per-gram-of-protein,
+  calories, or protein.
 - **Progress** - daily weight and waist entry, 7-day rolling average trend
   charts, and an adaptive maintenance calculation that back-solves your real
   TDEE from actual intake versus actual trend-weight change.

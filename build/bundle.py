@@ -25,7 +25,7 @@ for r in recipes:
         "cal": kcal, "p": r["protein"], "c": r["carbs"], "f": r["fat"],
         "ctp": r["ctp"], "tags": tags,
         "ing": r["ingredients"], "st": r["steps"],
-        "ed": r["edition"],
+        "ed": r["edition"], "pdf": r.get("pdf"), "vid": r.get("video"),
     })
 
 out.sort(key=lambda r: r["n"])

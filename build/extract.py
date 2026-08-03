@@ -183,10 +183,16 @@ for pdf in sorted(SRC.glob("*.pdf")):
         continue
 
     pages = []
+    video = None
     for pg in doc:
         sp = spans(pg)
         pages.append({"spans": sp, "w": pg.rect.width,
                       "text": "\n".join(s["t"] for s in sp)})
+        # "Watch recipe video" is an annotation, not text; only some editions have one
+        for lnk in pg.get_links():
+            uri = lnk.get("uri") or ""
+            if "instagram.com" in uri or "youtu" in uri or "tiktok" in uri:
+                video = video or uri
     doc.close()
     if not pages:
         problems.append((pdf.name, "no text"))
@@ -215,7 +221,8 @@ for pdf in sorted(SRC.glob("*.pdf")):
         sm = RE_SERV.search(whole)
         raw.append({"name": doc_title or subject, "servings": int(sm.group(1)) if sm else None,
                     "calories": t[0], "protein": t[1], "carbs": t[2], "fat": t[3],
-                    "ingredients": [], "steps": [], "source": pdf.name, "meta": meta})
+                    "ingredients": [], "steps": [], "source": pdf.name,
+                    "video": video, "meta": meta})
         continue
 
     multi = len(rec_pages) > 1
@@ -250,7 +257,7 @@ for pdf in sorted(SRC.glob("*.pdf")):
         raw.append({"name": title, "servings": servings,
                     "calories": cal, "protein": pro, "carbs": car, "fat": fat,
                     "ingredients": ingr, "steps": steps,
-                    "source": pdf.name, "meta": meta})
+                    "source": pdf.name, "video": video, "meta": meta})
 
 # ---- de-duplicate: same macros + servings == same dish across template variants
 best = {}
@@ -264,6 +271,10 @@ for r in raw:
     keep, drop = (r, prev[1]) if score > prev[0] else (prev[1], r)
     if len(drop["name"]) > len(keep["name"]):
         keep["name"] = drop["name"]
+    # the recipe-card variant often carries the video link, the detailed one the steps
+    keep["video"] = keep.get("video") or drop.get("video")
+    if not keep.get("meta", {}).get("url") and drop.get("meta", {}).get("url"):
+        keep["meta"] = drop["meta"]
     best[key] = (max(score, prev[0]), keep)
 
 recipes = []
@@ -276,6 +287,7 @@ for _, r in best.values():
     r["id"] = slug(name)[:60]
     r["edition"] = m.get("edition")
     r["date"] = m.get("date")
+    r["pdf"] = m.get("url")
     r["ctp"] = round(r["calories"] / r["protein"], 1) if r["protein"] else None
     recipes.append(r)
 
@@ -294,6 +306,8 @@ print(f"Recipes      : {len(recipes)}")
 print(f"With steps   : {sum(1 for r in recipes if r['steps'])}")
 print(f"With ingr    : {sum(1 for r in recipes if r['ingredients'])}")
 print(f"With servings: {sum(1 for r in recipes if r['servings'])}")
+print(f"With PDF url : {sum(1 for r in recipes if r.get('pdf'))}")
+print(f"With video   : {sum(1 for r in recipes if r.get('video'))}")
 print(f"Problems     : {len(problems)}")
 for x in problems:
     print("   ", x[0], "->", x[1])

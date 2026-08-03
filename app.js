@@ -11,6 +11,8 @@ const DEFAULTS = {
   log: {},        // "YYYY-MM-DD" -> [{id,name,meal,qty,cal,p,c,f,src}]
   measures: {},   // "YYYY-MM-DD" -> {w: lb, waist: in}
   custom: [],     // [{id,n,cal,p,c,f,unit}]
+  usage: {},      // foodId -> {n: times logged, last: "YYYY-MM-DD"}
+  marks: {},      // foodId -> "rotation" | "want" | "skip"
 };
 
 let S = load();
@@ -26,6 +28,8 @@ function load() {
       log:      parsed.log      || {},
       measures: parsed.measures || {},
       custom:   parsed.custom   || [],
+      usage:    parsed.usage    || {},
+      marks:    parsed.marks    || {},
     };
   } catch (e) {
     console.warn("load failed", e);
@@ -102,6 +106,31 @@ function foodList() {
 }
 function findFood(id) { return foodList().find(f => f.id === id); }
 
+/* The shortlist is earned: anything logged once joins it automatically.
+   Explicit marks let you pin something you have not eaten yet, or hide
+   something you tried and did not like. */
+function inRotation(id) {
+  if (S.marks[id] === "skip") return false;
+  if (S.marks[id] === "rotation") return true;
+  return (S.usage[id]?.n || 0) > 0;
+}
+function rotationList() {
+  return foodList()
+    .filter(f => inRotation(f.id))
+    .sort((a, b) => {
+      const ua = S.usage[a.id] || { n: 0, last: "" };
+      const ub = S.usage[b.id] || { n: 0, last: "" };
+      return (ub.last || "").localeCompare(ua.last || "") || ub.n - ua.n
+             || a.n.localeCompare(b.n);
+    });
+}
+function noteUsage(id) {
+  const u = S.usage[id] || (S.usage[id] = { n: 0, last: "" });
+  u.n += 1;
+  u.last = curDate;
+  if (S.marks[id] === "want" || S.marks[id] === "skip") delete S.marks[id];
+}
+
 function searchFoods(q, list) {
   const items = list || foodList();
   const s = q.trim().toLowerCase();
@@ -160,6 +189,12 @@ function renderToday() {
   for (const m of MEALS) byMeal[m] = [];
   entries().forEach((e, i) => { (byMeal[e.meal] || byMeal.Snack).push({ e, i }); });
 
+  const quick = rotationList().slice(0, 6);
+  $("#quickAdd").innerHTML = quick.length ? `
+    <div class="meal-head" style="padding-bottom:4px"><strong>Quick add</strong></div>
+    <div class="chips">${quick.map(f =>
+      `<button class="chip" data-again="${esc(f.id)}">${esc(f.n.length > 26 ? f.n.slice(0, 25) + "\u2026" : f.n)}</button>`).join("")}</div>` : "";
+
   $("#meals").innerHTML = MEALS.map(m => {
     const list = byMeal[m];
     const cals = list.reduce((s, x) => s + x.e.cal, 0);
@@ -191,17 +226,35 @@ function renderToday() {
 // ---------------------------------------------------------------- COOKBOOK
 let cbTag = "all";
 let cbSort = "name";
-const TAGS = ["all", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
+const TAGS = ["all", "rotation", "untried", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
+const TAG_LABEL = { all: "All", rotation: "My rotation", untried: "Not tried yet", mine: "My foods" };
 const SORTS = [["name", "A-Z"], ["ctp", "Best protein ratio"], ["cal", "Fewest calories"], ["p", "Most protein"]];
+
+function statusOf(id) {
+  if (S.marks[id] === "skip") return "skip";
+  if ((S.usage[id]?.n || 0) > 0) return "eaten";
+  if (S.marks[id] === "rotation") return "rotation";
+  if (S.marks[id] === "want") return "want";
+  return "new";
+}
+const STATUS_PILL = {
+  eaten:    `<span class="pill eaten">In rotation</span>`,
+  rotation: `<span class="pill eaten">In rotation</span>`,
+  want:     `<span class="pill want">Want to try</span>`,
+  skip:     `<span class="pill skip">Skipped</span>`,
+  new:      "",
+};
 
 function renderCookbook() {
   $("#cbChips").innerHTML = TAGS.map(t =>
-    `<button class="chip ${t === cbTag ? "on" : ""}" data-tag="${t}">${t === "all" ? "All" : t[0].toUpperCase() + t.slice(1)}</button>`).join("");
+    `<button class="chip ${t === cbTag ? "on" : ""}" data-tag="${t}">${TAG_LABEL[t] || t[0].toUpperCase() + t.slice(1)}</button>`).join("");
   $("#cbSort").innerHTML = SORTS.map(([k, l]) =>
     `<button class="chip ${k === cbSort ? "on" : ""}" data-sort="${k}">${l}</button>`).join("");
 
   let list = foodList();
-  if (cbTag !== "all") list = list.filter(f => f.tags.includes(cbTag));
+  if (cbTag === "rotation")      list = list.filter(f => inRotation(f.id));
+  else if (cbTag === "untried")  list = list.filter(f => statusOf(f.id) === "new");
+  else if (cbTag !== "all")      list = list.filter(f => f.tags.includes(cbTag));
   list = searchFoods($("#cbSearch").value, list);
 
   if (cbSort === "ctp")      list = list.slice().sort((a, b) => (a.ctp ?? 99) - (b.ctp ?? 99));
@@ -209,15 +262,21 @@ function renderCookbook() {
   else if (cbSort === "p")   list = list.slice().sort((a, b) => b.p - a.p);
   else                       list = list.slice().sort((a, b) => a.n.localeCompare(b.n));
 
-  $("#cbList").innerHTML = list.length ? list.map(f => `
-    <button class="row" data-food="${esc(f.id)}">
+  $("#cbCount").textContent = `${list.length} of ${foodList().length}`;
+
+  $("#cbList").innerHTML = list.length ? list.map(f => {
+    const st = statusOf(f.id);
+    const times = S.usage[f.id]?.n || 0;
+    return `<button class="row" data-food="${esc(f.id)}">
       <span class="r-main">
         <span class="r-name">${esc(f.n)}</span>
-        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${f.sv ? " &middot; makes " + f.sv : ""}</span>
+        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${times ? ` &middot; logged ${times}x` : ""}</span>
+        ${STATUS_PILL[st]}
       </span>
+      <span class="r-icons">${f.ref?.vid ? `<span class="mini" title="Has video">&#9654;</span>` : ""}</span>
       <span class="badge ${f.ctp && f.ctp <= 11 ? "good" : ""}">${f.ctp ?? "-"}</span>
-    </button>`).join("")
-    : `<p class="empty">Nothing matches that.</p>`;
+    </button>`;
+  }).join("") : `<p class="empty">Nothing matches that.</p>`;
 }
 
 // ---------------------------------------------------------------- PROGRESS
@@ -400,8 +459,11 @@ function closeSheets() {
   document.body.style.overflow = "";
 }
 
+let addScope = "mine";   // "mine" = earned shortlist, "all" = full library
+
 function openAdd(meal) {
   pendingMeal = meal || guessMeal();
+  addScope = rotationList().length ? "mine" : "all";
   $("#mealSeg").innerHTML = MEALS.map(m =>
     `<button class="${m === pendingMeal ? "on" : ""}" data-meal="${m}">${m}</button>`).join("");
   $("#addSearch").value = "";
@@ -415,17 +477,48 @@ function guessMeal() {
   if (h < 21) return "Dinner";
   return "Snack";
 }
-function renderAddResults() {
-  const q = $("#addSearch").value;
-  const list = searchFoods(q).slice(0, 60);
-  $("#addResults").innerHTML = list.length ? list.map(f => `
-    <button class="row" data-pick="${esc(f.id)}">
+
+function foodRow(f, extra = "") {
+  const times = S.usage[f.id]?.n || 0;
+  const sub = `${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f` +
+              (times ? ` &middot; logged ${times}x` : "");
+  return `<button class="row" data-pick="${esc(f.id)}">
       <span class="r-main">
         <span class="r-name">${esc(f.n)}</span>
-        <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f</span>
+        <span class="r-sub">${sub}</span>
       </span>
+      ${extra}
       <span class="badge ${f.ctp && f.ctp <= 11 ? "good" : ""}">${f.ctp ?? "-"}</span>
-    </button>`).join("") : `<p class="empty">No match. Add it under More &rsaquo; My foods.</p>`;
+    </button>`;
+}
+
+function renderAddResults() {
+  const q = $("#addSearch").value.trim();
+  const rot = rotationList();
+
+  $("#addScope").innerHTML = `
+    <button class="chip ${addScope === "mine" ? "on" : ""}" data-scope="mine">My foods (${rot.length})</button>
+    <button class="chip ${addScope === "all" ? "on" : ""}" data-scope="all">All ${RECIPES.length} recipes</button>`;
+
+  // searching always falls back to the full library so nothing is unreachable
+  const scope = (addScope === "all" || q) ? foodList() : rot;
+  const list = searchFoods(q, scope).slice(0, 60);
+  $("#addSearch").placeholder = addScope === "mine" && !q
+    ? "Search all 70 recipes..." : "Search recipes and foods...";
+
+  if (!list.length) {
+    $("#addResults").innerHTML = `<p class="empty">No match.<br>Add it under More &rsaquo; My foods.</p>`;
+    return;
+  }
+  let html = "";
+  if (addScope === "mine" && !q) {
+    html += `<p class="hint legend-hint">Your usual foods, most recent first. Anything you log once lands here automatically.</p>`;
+  }
+  html += list.map(f => foodRow(f)).join("");
+  if (addScope === "mine" && !q) {
+    html += `<button class="add-line" data-scope="all" style="margin-top:8px">Browse all ${RECIPES.length} recipes</button>`;
+  }
+  $("#addResults").innerHTML = html;
 }
 
 let portionFood = null, portionQty = 1;
@@ -442,6 +535,8 @@ function renderPortion() {
   $("#portionBody").innerHTML = `
     <h3>${esc(f.n)}</h3>
     <p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>
+    <div class="seg">${MEALS.map(m =>
+      `<button class="${m === pendingMeal ? "on" : ""}" data-meal="${m}">${m}</button>`).join("")}</div>
     <div class="qty-row">
       <button data-q="-">&minus;</button>
       <input id="qtyIn" type="number" inputmode="decimal" step="0.25" min="0.25" value="${q}">
@@ -462,6 +557,7 @@ function commitAdd() {
     cal: round(f.cal * q), p: round(f.p * q, 1), c: round(f.c * q, 1), f: round(f.f * q, 1),
     src: f.src,
   });
+  noteUsage(f.id);
   save(); closeSheets(); go("today"); renderToday();
   toast(`Added to ${pendingMeal.toLowerCase()}`);
 }
@@ -469,9 +565,15 @@ function commitAdd() {
 function openRecipe(id) {
   const r = RECIPES.find(x => x.id === id);
   if (!r) return;
+  const st = statusOf(r.id);
+  const times = S.usage[r.id]?.n || 0;
+  const links = [];
+  if (r.pdf) links.push(`<a class="btn linkbtn" href="${esc(r.pdf)}" target="_blank" rel="noopener">Open original recipe (PDF)</a>`);
+  if (r.vid) links.push(`<a class="btn linkbtn" href="${esc(r.vid)}" target="_blank" rel="noopener">Watch the video</a>`);
+
   $("#recipeBody").innerHTML = `
     <h3>${esc(r.n)}</h3>
-    <p class="hint">${r.cal} cal &middot; ${r.p}g protein &middot; ${r.c}g carbs &middot; ${r.f}g fat per serving${r.sv ? `. Makes ${r.sv}.` : ""}</p>
+    <p class="hint">${r.cal} cal &middot; ${r.p}g protein &middot; ${r.c}g carbs &middot; ${r.f}g fat per serving${r.sv ? `. Makes ${r.sv}.` : ""}${times ? ` You have logged this ${times}x.` : ""}</p>
     <div class="preview">
       <div><b>${r.ctp ?? "-"}</b><small>cal per g protein</small></div>
       <div><b>${r.sv ?? "-"}</b><small>servings</small></div>
@@ -479,8 +581,15 @@ function openRecipe(id) {
       <div><b>${r.ed ? "#" + r.ed : "-"}</b><small>edition</small></div>
     </div>
     <button class="btn primary full" data-logthis="${esc(r.id)}">Log this</button>
+    ${links.join("")}
+    <div class="mark-row">
+      <button class="chip ${st === "want" ? "on" : ""}" data-mark="want:${esc(r.id)}">Want to try</button>
+      <button class="chip ${st === "eaten" || st === "rotation" ? "on" : ""}" data-mark="rotation:${esc(r.id)}">In rotation</button>
+      <button class="chip ${st === "skip" ? "on" : ""}" data-mark="skip:${esc(r.id)}">Not for me</button>
+    </div>
     ${r.ing.length ? `<h3>Ingredients</h3><ul class="ing-list">${r.ing.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
-    ${r.st.length ? `<h3>Instructions</h3><ol class="step-list">${r.st.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}`;
+    ${r.st.length ? `<h3>Instructions</h3><ol class="step-list">${r.st.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
+    <p class="fine-print">The PDF and video open on the publisher's site and need a connection. Ingredients and steps above always work offline.</p>`;
   openSheet("sheetRecipe");
 }
 
@@ -526,21 +635,40 @@ function setDate(k) {
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close]");
+  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again]");
   if (!el) return;
   const d = el.dataset;
 
   if (d.view) return go(d.view);
   if (d.close !== undefined) return closeSheets();
+  if (d.scope) { addScope = d.scope; return renderAddResults(); }
+  if (d.mark) {
+    const [kind, fid] = d.mark.split(":");
+    // tapping an active mark clears it; "skip" only hides from the shortlist,
+    // it never discards how often you have actually eaten something
+    S.marks[fid] = S.marks[fid] === kind ? undefined : kind;
+    if (!S.marks[fid]) delete S.marks[fid];
+    save(); openRecipe(fid);
+    toast(S.marks[fid] === "rotation" ? "Added to your foods"
+        : S.marks[fid] === "skip" ? "Hidden from your foods"
+        : S.marks[fid] === "want" ? "Marked to try" : "Mark cleared");
+    return;
+  }
   if (d.tag) { cbTag = d.tag; return renderCookbook(); }
   if (d.sort) { cbSort = d.sort; return renderCookbook(); }
   if (d.food) { const f = findFood(d.food); return f && f.src === "recipe" ? openRecipe(d.food) : openPortion(d.food); }
   if (d.pick) return openPortion(d.pick);
   if (d.logthis) { closeSheets(); return openPortion(d.logthis); }
-  if (d.meal) { pendingMeal = d.meal; $$("#mealSeg button").forEach(b => b.classList.toggle("on", b.dataset.meal === d.meal)); return; }
+  if (d.meal) {
+    pendingMeal = d.meal;
+    if (!$("#sheetPortion").hidden) return renderPortion();
+    $$("#mealSeg button").forEach(b => b.classList.toggle("on", b.dataset.meal === d.meal));
+    return;
+  }
   if (d.setq) { portionQty = Number(d.setq); return renderPortion(); }
   if (d.q) { portionQty = Math.max(0.25, round(portionQty + (d.q === "+" ? 0.25 : -0.25), 2)); return renderPortion(); }
   if (d.addmeal) return openAdd(d.addmeal);
+  if (d.again) { pendingMeal = guessMeal(); return openPortion(d.again); }
   if (d.del !== undefined) {
     S.log[curDate].splice(Number(d.del), 1);
     if (!S.log[curDate].length) delete S.log[curDate];
