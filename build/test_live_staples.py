@@ -22,9 +22,9 @@ with sync_playwright() as pw:
     pg.goto(BASE, wait_until="networkidle")
     pg.wait_for_timeout(1200)
 
-    check("gram staples live", pg.evaluate("PANTRY.filter(b=>b.per100).length") == 4)
+    check("gram staples live", pg.evaluate("PANTRY.filter(b=>b.per100).length") >= 20)
     check("add-ons live", pg.evaluate("PANTRY.filter(b=>(b.tags||[]).includes('addon')).length") >= 5)
-    check("rice plate live", pg.evaluate("PANTRY.some(b=>b.id==='s-rice-chicken-plate')"))
+    check("no fixed rice plate", not pg.evaluate("PANTRY.some(b=>b.id==='s-rice-chicken-plate')"))
 
     print("\n== log the real dinner on the live site ==")
     pg.click("#fab")
@@ -74,7 +74,7 @@ with sync_playwright() as pw:
     pg.reload(wait_until="domcontentloaded")
     pg.wait_for_timeout(2200)
     check("loads offline", pg.locator(".meal").count() == 4)
-    check("staples offline", pg.evaluate("typeof PANTRY!=='undefined' && PANTRY.length") >= 18)
+    check("staples offline", pg.evaluate("typeof PANTRY!=='undefined' && PANTRY.length") >= 50)
     check("data intact offline", int(pg.inner_text("#kcalEaten")) == 923)
     ctx.set_offline(False)
 
