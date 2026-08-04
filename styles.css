@@ -332,7 +332,13 @@ label.block { display: grid; gap: 4px; margin-bottom: 8px; }
   width: 46px; height: 46px; border-radius: 0.625rem; border: 1px solid var(--cp-border);
   background: var(--cp-surface); color: var(--cp-text); font-size: 1.4rem; cursor: pointer;
 }
-.qty-row input { width: 96px; text-align: center; font-size: 1.2rem; font-weight: 650; }
+.qty-row input { width: 110px; text-align: center; font-size: 1.2rem; font-weight: 650; }
+.qty-wrap { position: relative; display: inline-flex; align-items: center; }
+.qty-wrap input { padding-right: 34px; }
+.qty-suffix {
+  position: absolute; right: 12px; font-size: 0.8rem; color: var(--cp-text-muted);
+  pointer-events: none; font-weight: 600;
+}
 .preview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; margin: 14px 0; }
 .preview div { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 12px; padding: 9px 4px; }
 .preview b { display: block; font-size: 1.05rem; font-variant-numeric: tabular-nums; }

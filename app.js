@@ -106,12 +106,14 @@ function simpleFoods() {
   for (const b of (typeof PANTRY !== "undefined" ? PANTRY : [])) {
     if (b.parts && b.parts.length) continue;
     out.push({ id: b.id, n: b.n, cal: b.cal, p: b.p, c: b.c, f: b.f,
-               unit: b.unit || "serving", tags: b.tags || ["pantry"], src: "pantry" });
+               unit: b.unit || "serving", tags: b.tags || ["pantry"], src: "pantry",
+               per100: !!b.per100, freeCal: !!b.freeCal });
   }
   for (const c of S.custom) {
     if (c.parts && c.parts.length) continue;
     out.push({ id: c.id, n: c.n, cal: c.cal, p: c.p, c: c.c, f: c.f,
-               unit: c.unit || "serving", tags: ["mine"], src: "custom" });
+               unit: c.unit || "serving", tags: ["mine"], src: "custom",
+               per100: !!c.per100, freeCal: !!c.freeCal });
   }
   // user corrections win over bundled values
   return out.map(f => {
@@ -259,7 +261,7 @@ function renderToday() {
       <div class="entry">
         <div class="e-main">
           <div class="e-name">${esc(e.name)}</div>
-          <div class="e-sub">${e.qty === 1 ? "1 serving" : e.qty + " servings"} &middot; ${round(e.p)}p ${round(e.c)}c ${round(e.f)}f</div>
+          <div class="e-sub">${esc(e.disp || (e.qty === 1 ? "1 serving" : e.qty + " servings"))} &middot; ${round(e.p)}p ${round(e.c)}c ${round(e.f)}f</div>
         </div>
         <span class="e-cal">${round(e.cal)}</span>
         <button class="del" data-del="${i}" aria-label="Remove">&times;</button>
@@ -283,9 +285,10 @@ function renderToday() {
 // ---------------------------------------------------------------- COOKBOOK
 let cbTag = "all";
 let cbSort = "name";
-const TAGS = ["all", "rotation", "untried", "pantry", "meal", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
+const TAGS = ["all", "rotation", "untried", "staple", "addon", "pantry", "meal", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
 const TAG_LABEL = { all: "All", rotation: "My rotation", untried: "Not tried yet",
-                    mine: "My foods", pantry: "Everyday", meal: "Saved meals" };
+                    mine: "My foods", pantry: "Everyday", meal: "Saved meals",
+                    staple: "Staples", addon: "Add-ons" };
 const SORTS = [["name", "A-Z"], ["ctp", "Best protein ratio"], ["cal", "Fewest calories"], ["p", "Most protein"]];
 
 function statusOf(id) {
@@ -325,7 +328,7 @@ function renderCookbook() {
   $("#cbList").innerHTML = list.length ? list.map(f => {
     const st = statusOf(f.id);
     const times = S.usage[f.id]?.n || 0;
-    const unit = f.src === "recipe" ? "" : ` / ${esc(f.unit)}`;
+    const unit = f.src === "recipe" ? "" : (f.per100 ? " / 100g" : ` / ${esc(f.unit)}`);
     return `<button class="row" data-food="${esc(f.id)}">
       <span class="r-main">
         <span class="r-name">${esc(f.n)}</span>
@@ -552,7 +555,8 @@ function guessMeal() {
 
 function foodRow(f, extra = "") {
   const times = S.usage[f.id]?.n || 0;
-  const sub = `${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f` +
+  const per = f.per100 ? " / 100g" : (f.src === "recipe" ? "" : ` / ${esc(f.unit)}`);
+  const sub = `${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${per}` +
               (times ? ` &middot; logged ${times}x` : "");
   return `<button class="row" data-pick="${esc(f.id)}">
       <span class="r-main">
@@ -594,32 +598,69 @@ function renderAddResults() {
 }
 
 let portionFood = null, portionQty = 1;
+
+/* Gram staples and free-calorie add-ons are entered in their natural unit
+   (grams, calories) rather than as a serving multiplier. Internally everything
+   is still a multiplier of the base row, so the log format never changes. */
+function inputMode(f) {
+  if (f.per100) return { key: "g", label: "grams", step: 10, per: 100,
+                         chips: [100, 150, 200, 250, 300] };
+  if (f.freeCal) return { key: "cal", label: "calories", step: 10, per: f.cal || 10,
+                          chips: [40, 80, 120, 200] };
+  return null;
+}
+function qtyToInput(f, q) {
+  const m = inputMode(f);
+  return m ? round(q * m.per, m.key === "g" ? 0 : 0) : q;
+}
+function inputToQty(f, v) {
+  const m = inputMode(f);
+  return m ? v / m.per : v;
+}
+
 function openPortion(id) {
   portionFood = findFood(id);
   if (!portionFood) return;
-  portionQty = 1;
+  const m = inputMode(portionFood);
+  portionQty = m ? (m.key === "g" ? 1.5 : 8) : 1;   // 150 g / 80 cal defaults
   renderPortion();
   openSheet("sheetPortion");
 }
+
 function renderPortion() {
   const f = portionFood, q = portionQty;
+  const m = inputMode(f);
   const mk = (v, l) => `<div><b>${round(f[v] * q, v === "cal" ? 0 : 1)}</b><small>${l}</small></div>`;
   const partsNote = f.parts && f.parts.length
     ? `<p class="hint">Contains ${f.parts.length} item${f.parts.length > 1 ? "s" : ""}.</p>` : "";
+
+  const head = m
+    ? `<p class="hint">${f.per100
+        ? `Per 100 g: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f`
+        : `Enter the calories from the label or your best estimate. Macros are split as a typical sauce.`}</p>`
+    : `<p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>`;
+
+  const shown = m ? qtyToInput(f, q) : q;
+  const chips = m
+    ? m.chips.map(v => `<button class="chip ${v === shown ? "on" : ""}" data-setq="${inputToQty(f, v)}">${v}${m.key === "g" ? "g" : " cal"}</button>`).join("")
+    : [0.5, 1, 1.5, 2].map(v => `<button class="chip ${v === q ? "on" : ""}" data-setq="${v}">${v}x</button>`).join("");
+
   $("#portionBody").innerHTML = `
     <h3>${esc(f.n)}</h3>
-    <p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>
+    ${head}
     ${partsNote}
-    ${partPicker ? "" : `<div class="seg">${MEALS.map(m =>
-      `<button class="${m === pendingMeal ? "on" : ""}" data-meal="${m}">${m}</button>`).join("")}</div>`}
+    ${partPicker ? "" : `<div class="seg">${MEALS.map(x =>
+      `<button class="${x === pendingMeal ? "on" : ""}" data-meal="${x}">${x}</button>`).join("")}</div>`}
     <div class="qty-row">
       <button data-q="-">&minus;</button>
-      <input id="qtyIn" type="number" inputmode="decimal" step="0.25" min="0.25" value="${q}">
+      <span class="qty-wrap">
+        <input id="qtyIn" type="number" inputmode="decimal" step="${m ? m.step : 0.25}" min="0"
+               value="${shown}" data-mode="${m ? m.key : ""}">
+        ${m ? `<span class="qty-suffix">${m.key === "g" ? "g" : "cal"}</span>` : ""}
+      </span>
       <button data-q="+">+</button>
     </div>
-    <div class="chips" style="justify-content:center">
-      ${[0.5, 1, 1.5, 2].map(v => `<button class="chip ${v === q ? "on" : ""}" data-setq="${v}">${v}x</button>`).join("")}
-    </div>
+    <div class="chips" style="justify-content:center">${chips}</div>
     <div class="preview">${mk("cal", "cal")}${mk("p", "protein")}${mk("c", "carbs")}${mk("f", "fat")}</div>
     <button class="btn primary full" id="confirmAdd">${partPicker ? "Add to meal" : `Add to ${pendingMeal.toLowerCase()}`}</button>
     ${f.src === "recipe" && !partPicker ? `<button class="btn full" id="viewRecipe">View recipe</button>` : ""}`;
@@ -637,8 +678,10 @@ function commitAdd() {
     return;
   }
   const list = S.log[curDate] || (S.log[curDate] = []);
+  const m = inputMode(f);
+  const disp = m ? `${qtyToInput(f, q)} ${m.key === "g" ? "g" : "cal"}` : null;
   list.push({
-    fid: f.id, name: f.n, meal: pendingMeal, qty: round(q, 2),
+    fid: f.id, name: f.n, meal: pendingMeal, qty: round(q, 3), disp,
     cal: round(f.cal * q), p: round(f.p * q, 1), c: round(f.c * q, 1), f: round(f.f * q, 1),
     src: f.src,
   });
@@ -653,10 +696,12 @@ function openPantry(id) {
   const idx = new Map(simpleFoods().map(x => [x.id, x]));
   const parts = f.parts ? f.parts.map(p => {
     const c = idx.get(p.id);
+    const m = c ? inputMode(c) : null;
+    const qs = m ? `${qtyToInput(c, p.qty)} ${m.key === "g" ? "g" : "cal"}` : `${p.qty}x`;
     return `<div class="entry">
       <div class="e-main">
         <div class="e-name">${esc(c ? c.n : "(missing)")}</div>
-        <div class="e-sub">${p.qty}x${c ? ` &middot; ${round(c.cal * p.qty)} cal, ${round(c.p * p.qty, 1)}p` : ""}</div>
+        <div class="e-sub">${qs}${c ? ` &middot; ${round(c.cal * p.qty)} cal, ${round(c.p * p.qty, 1)}p` : ""}</div>
       </div>
     </div>`;
   }).join("") : "";
@@ -781,10 +826,12 @@ function renderCustom() {
   const t = mealTotals(customParts, idx);
   const partRows = customParts.length ? customParts.map((p, i) => {
     const f = idx.get(p.id);
+    const m = f ? inputMode(f) : null;
+    const qs = m ? `${qtyToInput(f, p.qty)} ${m.key === "g" ? "g" : "cal"}` : `${p.qty}x`;
     return `<div class="entry">
       <div class="e-main">
         <div class="e-name">${esc(f ? f.n : "(missing food)")}</div>
-        <div class="e-sub">${p.qty}x${f ? ` &middot; ${round(f.cal * p.qty)} cal, ${round(f.p * p.qty, 1)}p` : ""}</div>
+        <div class="e-sub">${qs}${f ? ` &middot; ${round(f.cal * p.qty)} cal, ${round(f.p * p.qty, 1)}p` : ""}</div>
       </div>
       <button class="del" data-delpart="${i}" aria-label="Remove">&times;</button>
     </div>`;
@@ -928,7 +975,17 @@ document.addEventListener("click", ev => {
     return;
   }
   if (d.setq) { portionQty = Number(d.setq); return renderPortion(); }
-  if (d.q) { portionQty = Math.max(0.25, round(portionQty + (d.q === "+" ? 0.25 : -0.25), 2)); return renderPortion(); }
+  if (d.q) {
+    const m = inputMode(portionFood);
+    if (m) {
+      const cur = qtyToInput(portionFood, portionQty);
+      const next = Math.max(0, cur + (d.q === "+" ? m.step : -m.step));
+      portionQty = inputToQty(portionFood, next);
+    } else {
+      portionQty = Math.max(0.25, round(portionQty + (d.q === "+" ? 0.25 : -0.25), 2));
+    }
+    return renderPortion();
+  }
   if (d.addmeal) return openAdd(d.addmeal);
   if (d.again) { pendingMeal = guessMeal(); return openPortion(d.again); }
   if (d.day) { setDate(d.day); closeSheets(); return; }
@@ -969,8 +1026,11 @@ $("#addSearch").addEventListener("input", renderAddResults);
 
 document.addEventListener("input", ev => {
   if (ev.target.id === "qtyIn") {
-    portionQty = Math.max(0.25, Number(ev.target.value) || 1);
     const f = portionFood;
+    const raw = Number(ev.target.value);
+    const m = inputMode(f);
+    portionQty = m ? Math.max(0, inputToQty(f, raw || 0))
+                   : Math.max(0.25, raw || 1);
     const cells = $$("#portionBody .preview b");
     if (cells.length === 4) {
       cells[0].textContent = round(f.cal * portionQty);

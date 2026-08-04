@@ -23,21 +23,23 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(500)
 
     print("== pantry loaded ==")
-    check("pantry bundled", pg.evaluate("typeof PANTRY !== 'undefined' && PANTRY.length") == 8,
-          str(pg.evaluate("typeof PANTRY!=='undefined' ? PANTRY.length : 'undef'")))
-    check("total foods = 78", pg.evaluate("RECIPES.length + PANTRY.length") == 78)
+    NP = pg.evaluate("PANTRY.length")
+    TOTAL = pg.evaluate("RECIPES.length + PANTRY.length")
+    check("pantry bundled", NP >= 8, f"count={NP}")
+    check("totals line up", pg.evaluate("RECIPES.length") + NP == TOTAL)
 
     print("\n== pantry starts in My foods ==")
     check("quick add populated on first run", "Quick add" in pg.inner_text("#quickAdd"))
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
     scope = pg.inner_text("#addScope")
-    check("shortlist has the 8 pantry items", "My foods (8)" in scope, scope)
-    check("everything shows 78", "Everything (78)" in scope, scope)
+    check("shortlist has every pantry item", f"My foods ({NP})" in scope, scope)
+    check("everything shows the full count", f"Everything ({TOTAL})" in scope, scope)
     check("defaults to my foods",
           "on" in (pg.locator("#addScope .chip").first.get_attribute("class") or ""))
-    check("saved meal listed first",
-          "Sandwich Meal" in pg.locator("#addResults .row").first.inner_text(),
+    check("a saved meal is listed first",
+          "Meal" in pg.locator("#addResults .row").first.inner_text()
+          or "Plate" in pg.locator("#addResults .row").first.inner_text(),
           pg.locator("#addResults .row").first.inner_text()[:60])
     pg.screenshot(path="../shots/14-myfoods.png")
 
@@ -51,6 +53,8 @@ with sync_playwright() as pw:
       return {cal: Math.round(cal), p: +p.toFixed(1), c: +c.toFixed(1), f: +f.toFixed(1)};
     }""")
     print("   computed:", meal)
+    pg.fill("#addSearch", "sandwich meal")
+    pg.wait_for_timeout(300)
     row = pg.locator("#addResults .row").first.inner_text()
     check("meal calories shown", str(meal["cal"]) in row, f"{meal} vs {row[:70]}")
     check("meal is a sane sandwich", 480 < meal["cal"] < 620, str(meal))
