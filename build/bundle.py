@@ -1,31 +1,57 @@
-"""Bundle data/recipes.json into site/recipes.js with derived tags."""
+"""Bundle recipe JSON from both cookbooks into site/recipes.js with derived tags."""
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).parent.parent
 recipes = json.loads((ROOT / "data/recipes.json").read_text(encoding="utf-8"))
+joe_path = ROOT / "data/joe_recipes.json"
+joe = json.loads(joe_path.read_text(encoding="utf-8")) if joe_path.exists() else []
 
 TAGS = [
-    ("breakfast", r"breakfast|egg|sausage.*sandwich|maple bacon"),
-    ("chicken",   r"chicken|tandoori|tinga|bulgogi|tikka|gochujang|teriyaki"),
-    ("beef",      r"beef|steak|brisket|cheeseburger|birria|asada|lomo|meatball|ragu"),
-    ("pasta",     r"pasta|mac n|ziti|lasagna|alfredo|noodle|ragu"),
-    ("rice",      r"rice|fried rice"),
-    ("burrito",   r"burrito|wrap|quesadilla|taco"),
+    ("breakfast", r"breakfast|egg|sausage.*sandwich|maple bacon|omelette|porridge"),
+    ("chicken",   r"chicken|tandoori|tinga|bulgogi|tikka|gochujang|teriyaki|katsu|dakjuk|dakgalbi"),
+    ("beef",      r"beef|steak|brisket|cheeseburger|birria|asada|lomo|meatball|ragu|bulgogi|kbbq|jangjorim"),
+    ("seafood",   r"shrimp|salmon|tuna|fish|squid|anchov|lox|enoki roll"),
+    ("pasta",     r"pasta|mac n|ziti|lasagna|alfredo|noodle|ragu|udon|japchae"),
+    ("rice",      r"rice|fried rice|gimbap|porridge|ddukguk"),
+    ("burrito",   r"burrito|wrap|quesadilla|taco|roll|ssam"),
     ("pizza",     r"pizza"),
-    ("soup",      r"soup"),
+    ("soup",      r"soup|stew|jjigae|guk|soondubu"),
+    ("korean",    r"korean|kimchi|gochujang|bulgogi|banchan|jeon|namul|muchim|bokkeum|mari|jjim|kbbq|ssam|gimbap|japchae|dduk|myeolchi|ojingeochae|sangchu|sigeumchi|mayak|eomuk|jangjorim|dakjuk|dakgalbi|soondubu|miyeokguk|muguk"),
 ]
+
+
+def tag(name, extra=()):
+    out = [t for t, rx in TAGS if re.search(rx, name, re.I)]
+    for e in extra:
+        if e and e not in out:
+            out.append(e)
+    return out
+
 
 out = []
 for r in recipes:
-    name = r["name"]
-    tags = [t for t, rx in TAGS if re.search(rx, name, re.I)]
-    kcal = r["calories"]
     out.append({
-        "id": r["id"], "n": name, "sv": r["servings"],
-        "cal": kcal, "p": r["protein"], "c": r["carbs"], "f": r["fat"],
-        "ctp": r["ctp"], "tags": tags,
+        "id": r["id"], "n": r["name"], "sv": r["servings"],
+        "cal": r["calories"], "p": r["protein"], "c": r["carbs"], "f": r["fat"],
+        "ctp": r["ctp"], "tags": tag(r["name"]) + ["stealth"],
         "ing": r["ingredients"], "st": r["steps"],
         "ed": r["edition"], "pdf": r.get("pdf"), "vid": r.get("video"),
+        "book": "Stealth Health",
+    })
+
+CAT_TAG = {"Meal Prep": "mealprep", "30-Minute": "quick", "High Protein": "highprotein",
+           "Viral": "viral", "Banchan": "banchan", "Soups": "soup"}
+
+for r in joe:
+    cat = r.get("category", "")
+    out.append({
+        "id": r["id"], "n": r["name"], "sv": r["servings"],
+        "cal": r["calories"], "p": r["protein"], "c": r["carbs"], "f": r["fat"],
+        "ctp": r["ctp"], "tags": tag(r["name"], [CAT_TAG.get(cat), "joe"]),
+        "ing": r["ingredients"], "st": r["steps"],
+        "ed": None, "pdf": None, "vid": None,
+        "book": "Joe x Fitness", "cat": cat, "basis": r.get("basis"),
+        "blurb": r.get("blurb"),
     })
 
 out.sort(key=lambda r: r["n"])
@@ -36,9 +62,12 @@ site = ROOT / "site"
 site.mkdir(exist_ok=True)
 (site / "recipes.js").write_text(js, encoding="utf-8")
 print(f"wrote site/recipes.js  recipes={len(out)}  size={len(js)/1024:.1f} KB")
+print(f"   Stealth Health: {sum(1 for r in out if r['book'] == 'Stealth Health')}")
+print(f"   Joe x Fitness : {sum(1 for r in out if r['book'] == 'Joe x Fitness')}")
 tagcount = {}
 for r in out:
     for t in r["tags"]:
         tagcount[t] = tagcount.get(t, 0) + 1
 print("tags:", dict(sorted(tagcount.items(), key=lambda kv: -kv[1])))
 print("untagged:", [r["n"] for r in out if not r["tags"]])
+

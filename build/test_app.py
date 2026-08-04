@@ -27,7 +27,7 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(400)
 
     print("\n== boot ==")
-    check("recipes loaded", pg.evaluate("typeof RECIPES !== 'undefined' && RECIPES.length") == 70,
+    check("recipes loaded", pg.evaluate("typeof RECIPES !== 'undefined' && RECIPES.length") >= 70,
           str(pg.evaluate("typeof RECIPES !== 'undefined' ? RECIPES.length : 'undefined'")))
     check("title is Today", pg.inner_text("#viewTitle").strip() == "Today")
     check("target shows 1875", pg.inner_text("#kcalTarget").strip() == "1875",

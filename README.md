@@ -20,10 +20,12 @@ estimate.
   snacks) plus saved meals that combine them. Meal macros are derived from
   their components, so correcting one component updates every meal using it.
   Any bundled value can be corrected on-device without a redeploy.
-- **Cookbook** - 70 recipes with full ingredients and instructions, plus a link
-  to the original publisher PDF (all 70) and the recipe video (19 of them).
-  Filter by rotation status or protein type, sort by calories-per-gram-of-protein,
-  calories, or protein.
+- **Cookbook** - 120 recipes from two sources, each with full ingredients and
+  instructions. The 70 Stealth Health recipes link to the original publisher
+  PDF and, where available, the recipe video. The 50 Joe x Fitness recipes are
+  Korean and Asian-inspired, tagged by category (meal prep, 30-minute, high
+  protein, viral, banchan, soups). Filter by book, cuisine, rotation status or
+  protein type; sort by calories-per-gram-of-protein, calories, or protein.
 - **Progress** - daily weight and waist entry, 7-day rolling average trend
   charts, and an adaptive maintenance calculation that back-solves your real
   TDEE from actual intake versus actual trend-weight change.
@@ -38,10 +40,11 @@ contains no personal data. Use **More > Export data** to back up.
 ## Development
 
 ```
-python build/extract.py   # parse source recipe PDFs -> data/recipes.json
-python build/bundle.py    # data/recipes.json -> site/recipes.js
-python build/icons.py     # regenerate app icons
-python build/test_app.py  # end-to-end browser tests (needs local server)
+python build/extract.py      # parse Stealth Health PDFs -> data/recipes.json
+python build/extract_joe.py  # parse the Joe x Fitness cookbook -> data/joe_recipes.json
+python build/bundle.py       # merge both -> site/recipes.js
+python build/icons.py        # regenerate app icons
+python build/test_app.py     # end-to-end browser tests (needs local server)
 ```
 
 Serve locally with `python -m http.server 8777` from `site/`.

@@ -318,10 +318,15 @@ function addWater(delta) {
 // ---------------------------------------------------------------- COOKBOOK
 let cbTag = "all";
 let cbSort = "name";
-const TAGS = ["all", "rotation", "untried", "staple", "addon", "pantry", "meal", "chicken", "beef", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
+const TAGS = ["all", "rotation", "untried", "staple", "addon", "pantry", "meal",
+              "joe", "stealth", "korean", "highprotein", "quick", "mealprep", "banchan",
+              "chicken", "beef", "seafood", "pasta", "rice", "burrito", "breakfast", "pizza", "soup", "mine"];
 const TAG_LABEL = { all: "All", rotation: "My rotation", untried: "Not tried yet",
                     mine: "My foods", pantry: "Everyday", meal: "Saved meals",
-                    staple: "Staples", addon: "Add-ons" };
+                    staple: "Staples", addon: "Add-ons",
+                    joe: "Joe x Fitness", stealth: "Stealth Health",
+                    highprotein: "High protein", quick: "30-minute",
+                    mealprep: "Meal prep", banchan: "Banchan" };
 const SORTS = [["name", "A-Z"], ["ctp", "Best protein ratio"], ["cal", "Fewest calories"], ["p", "Most protein"]];
 
 function statusOf(id) {
@@ -366,7 +371,8 @@ function renderCookbook() {
       <span class="r-main">
         <span class="r-name">${esc(f.n)}</span>
         <span class="r-sub">${f.cal} cal &middot; ${f.p}p ${f.c}c ${f.f}f${unit}${times ? ` &middot; logged ${times}x` : ""}</span>
-        ${STATUS_PILL[st]}${f.parts ? `<span class="pill want">Meal</span>` : ""}
+        ${STATUS_PILL[st]}${f.parts ? `<span class="pill want">Meal</span>` : ""}${
+          f.ref?.book === "Joe x Fitness" ? `<span class="pill book">Joe x Fitness</span>` : ""}
       </span>
       <span class="r-icons">${f.ref?.vid ? `<span class="mini" title="Has video">&#9654;</span>` : ""}</span>
       <span class="badge ${f.ctp && f.ctp <= 11 ? "good" : ""}">${f.ctp ?? "-"}</span>
@@ -774,14 +780,24 @@ function openRecipe(id) {
   if (r.pdf) links.push(`<a class="btn linkbtn" href="${esc(r.pdf)}" target="_blank" rel="noopener">Open original recipe (PDF)</a>`);
   if (r.vid) links.push(`<a class="btn linkbtn" href="${esc(r.vid)}" target="_blank" rel="noopener">Watch the video</a>`);
 
+  // Joe's ingredient lists carry sub-headings marked with "## "
+  const ingHtml = r.ing.length ? r.ing.map(i =>
+    i.startsWith("## ")
+      ? `<li class="ing-head">${esc(i.slice(3))}</li>`
+      : `<li>${esc(i)}</li>`).join("") : "";
+
+  const basis = r.basis ? `Per ${esc(r.basis)}` : "Per serving";
+  const makes = r.sv ? `. Makes ${r.sv}.` : "";
+
   $("#recipeBody").innerHTML = `
     <h3>${esc(r.n)}</h3>
-    <p class="hint">${r.cal} cal &middot; ${r.p}g protein &middot; ${r.c}g carbs &middot; ${r.f}g fat per serving${r.sv ? `. Makes ${r.sv}.` : ""}${times ? ` You have logged this ${times}x.` : ""}</p>
+    <p class="hint">${basis}: ${r.cal} cal &middot; ${r.p}g protein &middot; ${r.c}g carbs &middot; ${r.f}g fat${makes}${times ? ` You have logged this ${times}x.` : ""}</p>
+    ${r.book ? `<p class="fine-print src-line">${esc(r.book)}${r.cat ? " &middot; " + esc(r.cat) : ""}${r.ed ? " &middot; #" + r.ed : ""}</p>` : ""}
     <div class="preview">
       <div><b>${r.ctp ?? "-"}</b><small>cal per g protein</small></div>
       <div><b>${r.sv ?? "-"}</b><small>servings</small></div>
       <div><b>${round(r.p * 4 / r.cal * 100)}%</b><small>from protein</small></div>
-      <div><b>${r.ed ? "#" + r.ed : "-"}</b><small>edition</small></div>
+      <div><b>${r.st.length}</b><small>steps</small></div>
     </div>
     <button class="btn primary full" data-logthis="${esc(r.id)}">Log this</button>
     ${links.join("")}
@@ -790,9 +806,10 @@ function openRecipe(id) {
       <button class="chip ${st === "eaten" || st === "rotation" ? "on" : ""}" data-mark="rotation:${esc(r.id)}">In rotation</button>
       <button class="chip ${st === "skip" ? "on" : ""}" data-mark="skip:${esc(r.id)}">Not for me</button>
     </div>
-    ${r.ing.length ? `<h3>Ingredients</h3><ul class="ing-list">${r.ing.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+    ${r.blurb ? `<p class="blurb">${esc(r.blurb)}</p>` : ""}
+    ${ingHtml ? `<h3>Ingredients</h3><ul class="ing-list">${ingHtml}</ul>` : ""}
     ${r.st.length ? `<h3>Instructions</h3><ol class="step-list">${r.st.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
-    <p class="fine-print">The PDF and video open on the publisher's site and need a connection. Ingredients and steps above always work offline.</p>`;
+    ${r.pdf ? `<p class="fine-print">The PDF and video open on the publisher's site and need a connection. Ingredients and steps above always work offline.</p>` : ""}`;
   openSheet("sheetRecipe");
 }
 
