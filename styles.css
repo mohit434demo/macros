@@ -130,10 +130,34 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 14px 24px; }
 }
 .ring-num { font-size: 1.9rem; font-weight: 700; line-height: 1; }
 .ring-lbl { font-size: 0.72rem; color: var(--cp-text-muted); margin-top: 2px; }
-.summary-side { display: grid; gap: 10px; flex: 1; }
+.summary-side { display: grid; gap: 10px; flex: 1; min-width: 0; align-content: center; }
+.mini-stats { display: flex; justify-content: space-between; gap: 6px; }
 .stat { display: flex; flex-direction: column; }
 .stat span { font-size: 1.15rem; font-weight: 650; }
 .stat label { font-size: 0.72rem; color: var(--cp-text-muted); }
+.mini-stats .stat span { font-size: 1rem; }
+.mini-stats .stat label { font-size: 0.64rem; }
+
+/* ---------- water ---------- */
+.water { display: grid; gap: 5px; }
+.water-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.72rem; color: var(--cp-text-muted);
+}
+.water-head b { color: var(--cp-text); font-size: 0.9rem; }
+.bar > i.m-water { background: var(--cp-link); }
+.bar > i.m-water.done { background: var(--cp-success); }
+.water-btns { display: flex; gap: 5px; }
+.wbtn {
+  flex: 1; border: 1px solid var(--cp-border); background: var(--cp-surface);
+  color: var(--cp-text); border-radius: 0.625rem; padding: 6px 4px;
+  font: inherit; font-size: 0.7rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.wbtn:active { background: var(--cp-accent-soft); }
+.wbtn.ghost {
+  flex: 0 0 auto; width: 24px; padding: 2px 0; font-size: 0.85rem; line-height: 1;
+  color: var(--cp-text-muted);
+}
 
 /* ---------- macro bars ---------- */
 .macros { display: grid; gap: 11px; }

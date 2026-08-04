@@ -6,10 +6,11 @@
 // ---------------------------------------------------------------- storage
 const KEY = "nt.v1";
 const DEFAULTS = {
-  targets: { cal: 1875, pro: 140, fat: 52, carb: 212, fib: 35, goalWeight: 165 },
+  targets: { cal: 1875, pro: 140, fat: 52, carb: 212, fib: 35, goalWeight: 165, water: 100 },
   profile: { age: 31, heightIn: 67, sex: "m", act: 1.375 },
   log: {},        // "YYYY-MM-DD" -> [{id,name,meal,qty,cal,p,c,f,src}]
   measures: {},   // "YYYY-MM-DD" -> {w: lb, waist: in}
+  water: {},      // "YYYY-MM-DD" -> ounces
   custom: [],     // [{id,n,cal,p,c,f,unit,parts?}]
   usage: {},      // foodId -> {n: times logged, last: "YYYY-MM-DD"}
   marks: {},      // foodId -> "rotation" | "want" | "skip"
@@ -28,6 +29,7 @@ function load() {
       profile:  Object.assign({}, DEFAULTS.profile,  parsed.profile),
       log:      parsed.log      || {},
       measures: parsed.measures || {},
+      water:    parsed.water    || {},
       custom:   parsed.custom   || [],
       usage:    parsed.usage    || {},
       marks:    parsed.marks    || {},
@@ -254,6 +256,8 @@ function renderToday() {
     </div>`;
   }).join("");
 
+  renderWater();
+
   const byMeal = {};
   for (const m of MEALS) byMeal[m] = [];
   entries().forEach((e, i) => { (byMeal[e.meal] || byMeal.Snack).push({ e, i }); });
@@ -290,6 +294,25 @@ function renderToday() {
     else if (left > 400 && new Date().getHours() >= 20) note.push("Big gap left. Under-eating is not a win; it usually shows up as a binge later.");
   }
   $("#dayNote").textContent = note.join(" ");
+}
+
+function renderWater() {
+  const oz = S.water[curDate] || 0;
+  const goal = S.targets.water || 100;
+  $("#waterOz").textContent = oz;
+  $("#waterGoal").textContent = goal;
+  const pct = goal ? clamp(oz / goal, 0, 1) * 100 : 0;
+  const bar = $("#waterBar");
+  bar.style.width = pct + "%";
+  bar.classList.toggle("done", oz >= goal);
+}
+
+function addWater(delta) {
+  const oz = Math.max(0, (S.water[curDate] || 0) + delta);
+  if (oz) S.water[curDate] = oz;
+  else delete S.water[curDate];
+  save();
+  renderWater();
 }
 
 // ---------------------------------------------------------------- COOKBOOK
@@ -487,6 +510,7 @@ function renderMore() {
   $("#tCal").value = t.cal; $("#tPro").value = t.pro;
   $("#tFat").value = t.fat; $("#tCarb").value = t.carb;
   $("#tFib").value = t.fib; $("#tGoal").value = t.goalWeight;
+  $("#tWater").value = t.water ?? 100;
   $("#pAge").value = p.age; $("#pHeight").value = p.heightIn;
   $("#pAct").value = String(p.act);
 
@@ -953,10 +977,11 @@ function setDate(k) {
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit]");
+  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit],[data-water]");
   if (!el) return;
   const d = el.dataset;
 
+  if (d.water) return addWater(Number(d.water));
   if (d.view) return go(d.view);
   if (d.close !== undefined) return closeSheets();
   if (d.scope) { addScope = d.scope; return renderAddResults(); }
@@ -1088,6 +1113,7 @@ document.addEventListener("click", ev => {
       cal: +$("#tCal").value || 1875, pro: +$("#tPro").value || 140,
       fat: +$("#tFat").value || 52, carb: +$("#tCarb").value || 212,
       fib: +$("#tFib").value || 35, goalWeight: +$("#tGoal").value || 165,
+      water: +$("#tWater").value || 100,
     };
     save(); renderToday(); toast("Targets saved");
     return;
@@ -1157,6 +1183,8 @@ $("#importFile").addEventListener("change", ev => {
         targets: Object.assign({}, DEFAULTS.targets, d.targets),
         profile: Object.assign({}, DEFAULTS.profile, d.profile),
         log: d.log || {}, measures: d.measures || {}, custom: d.custom || [],
+        water: d.water || {}, usage: d.usage || {}, marks: d.marks || {},
+        edits: d.edits || {},
       };
       save(); go("today"); toast("Data imported");
     } catch (e) { toast("That file could not be read"); }

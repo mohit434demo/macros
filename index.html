@@ -53,9 +53,22 @@
         </div>
       </div>
       <div class="summary-side">
-        <div class="stat"><span id="kcalEaten">0</span><label>eaten</label></div>
-        <div class="stat"><span id="kcalTarget">0</span><label>target</label></div>
-        <div class="stat"><span id="ctpToday">-</span><label>cal/protein</label></div>
+        <div class="mini-stats">
+          <div class="stat"><span id="kcalEaten">0</span><label>eaten</label></div>
+          <div class="stat"><span id="kcalTarget">0</span><label>target</label></div>
+          <div class="stat"><span id="ctpToday">-</span><label>cal/protein</label></div>
+        </div>
+        <div class="water">
+          <div class="water-head">
+            <span><b id="waterOz">0</b> / <span id="waterGoal">100</span> oz water</span>
+            <button class="wbtn ghost" data-water="-8" aria-label="Remove 8 ounces">&minus;</button>
+          </div>
+          <span class="bar"><i id="waterBar" class="m-water"></i></span>
+          <div class="water-btns">
+            <button class="wbtn" data-water="8">+8 glass</button>
+            <button class="wbtn" data-water="16">+16 bottle</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -133,6 +146,10 @@
       <div class="field-row">
         <label>Fiber (g) <input id="tFib" type="number" inputmode="numeric"></label>
         <label>Goal weight (lb) <input id="tGoal" type="number" inputmode="decimal" step="0.5"></label>
+      </div>
+      <div class="field-row">
+        <label>Water (oz) <input id="tWater" type="number" inputmode="numeric"></label>
+        <span></span>
       </div>
       <button id="saveTargets" class="btn primary full">Save targets</button>
     </div>
