@@ -22,15 +22,17 @@ with sync_playwright() as pw:
     pg.goto(BASE, wait_until="networkidle")
     pg.wait_for_timeout(400)
 
-    print("== first run: shortlist starts as the bundled pantry ==")
+    print("== first run: shortlist starts as the curated starter set ==")
+    import re as _re
     NP = pg.evaluate("PANTRY.length")
     TOTAL = pg.evaluate("RECIPES.length + PANTRY.length")
-    check("quick add shows pantry", "Quick add" in pg.inner_text("#quickAdd"))
+    check("quick add shows starter foods", "Quick add" in pg.inner_text("#quickAdd"))
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
     scope_txt = pg.inner_text("#addScope")
-    check("scope chips shown", f"My foods ({NP})" in scope_txt and f"Everything ({TOTAL})" in scope_txt, scope_txt)
-    check("defaults to my foods when pantry exists",
+    NSTART = int(_re.search(r"My foods \((\d+)\)", scope_txt).group(1))
+    check("scope chips shown", 0 < NSTART < TOTAL and f"Everything ({TOTAL})" in scope_txt, scope_txt)
+    check("defaults to my foods when the starter set exists",
           "on" in (pg.locator("#addScope .chip").first.get_attribute("class") or ""))
     pg.click("[data-scope='all']")
     pg.wait_for_timeout(250)
@@ -52,10 +54,10 @@ with sync_playwright() as pw:
 
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
-    check("scope counts updated", f"My foods ({NP + 1})" in pg.inner_text("#addScope"),
+    check("scope counts updated", f"My foods ({NSTART + 1})" in pg.inner_text("#addScope"),
           pg.inner_text("#addScope"))
     rows = pg.locator("#addResults .row").count()
-    check("shortlist is short", rows == NP + 1, f"rows={rows}")
+    check("shortlist is short", rows == NSTART + 1, f"rows={rows}")
     check("shows log count", "logged 1x" in pg.inner_text("#addResults"))
 
     print("\n== search still reaches the whole library ==")
@@ -81,7 +83,7 @@ with sync_playwright() as pw:
     pg.click("[data-tag='rotation']")
     pg.wait_for_timeout(250)
     rot = pg.locator("#cbList .row").count()
-    check("rotation filter", rot >= NP, f"rot={rot}")
+    check("rotation filter", rot >= NSTART, f"rot={rot} starter={NSTART}")
     pg.click("[data-tag='untried']")
     pg.wait_for_timeout(250)
     unt = pg.locator("#cbList .row").count()

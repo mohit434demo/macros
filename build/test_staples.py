@@ -24,11 +24,15 @@ with sync_playwright() as pw:
 
     print("== staples bundled ==")
     check("gram staples present",
-          pg.evaluate("PANTRY.filter(b=>b.per100).length") == 4,
-          str(pg.evaluate("PANTRY.filter(b=>b.per100).map(b=>b.n)")))
-    check("free-cal add-on present", pg.evaluate("PANTRY.filter(b=>b.freeCal).length") == 1)
-    check("rice plate meal present",
-          pg.evaluate("PANTRY.some(b=>b.id==='s-rice-chicken-plate')"))
+          pg.evaluate("PANTRY.filter(b=>b.per100).length") >= 20,
+          str(pg.evaluate("PANTRY.filter(b=>b.per100).length")))
+    check("core staples included",
+          pg.evaluate("""['s-rice-white','s-chicken-thigh','s-chicken-breast','s-pasta']
+                          .every(id => PANTRY.some(b=>b.id===id))"""))
+    check("free-cal add-ons present", pg.evaluate("PANTRY.filter(b=>b.freeCal).length") >= 1)
+    npantry = pg.evaluate("PANTRY.length")
+    check("staple library expanded", npantry >= 50, f"count={npantry}")
+    check("no fixed rice plate", not pg.evaluate("PANTRY.some(b=>b.id==='s-rice-chicken-plate')"))
 
     print("\n== rice: enter grams, not multipliers ==")
     pg.click("#fab")
@@ -100,18 +104,37 @@ with sync_playwright() as pw:
     check("three entries", pg.locator(".entry").count() == 3)
     pg.screenshot(path="../shots/17-gram-dinner.png", full_page=True)
 
-    print("\n== the saved plate reproduces the same dinner ==")
+    print("\n== the plate's parts still add up ==")
     plate = pg.evaluate("""() => {
       const idx = {}; PANTRY.forEach(b => { if(!b.parts) idx[b.id]=b; });
-      const m = PANTRY.find(b => b.id === 's-rice-chicken-plate');
-      let cal=0,p=0;
-      for (const part of m.parts) { const s = idx[part.id];
-        cal += s.cal*part.qty; p += s.p*part.qty; }
+      const rice = idx['s-rice-white'], thigh = idx['s-chicken-thigh'], sauce = idx['s-sauce-addon'];
+      const cal = rice.cal*1.5 + thigh.cal*3.1 + sauce.cal*8;
+      const p = rice.p*1.5 + thigh.p*3.1 + sauce.p*8;
       return {cal: Math.round(cal), p: +p.toFixed(1)};
     }""")
-    print("   plate:", plate)
-    check("plate matches the manual total", plate["cal"] == 923, str(plate))
-    check("plate protein matches", abs(plate["p"] - 84.65) < 0.5, str(plate))
+    print("   dinner:", plate)
+    check("dinner math checks out", plate["cal"] == 923, str(plate))
+    check("dinner protein", abs(plate["p"] - 84.65) < 0.5, str(plate))
+
+    print("\n== last portion is remembered ==")
+    pg.click("#fab")
+    pg.fill("#addSearch", "white rice")
+    pg.wait_for_timeout(300)
+    pg.locator("#addResults .row").first.click()
+    pg.wait_for_selector("#sheetPortion:not([hidden])")
+    check("rice pre-fills last 150 g", pg.input_value("#qtyIn") == "150", pg.input_value("#qtyIn"))
+    pg.fill("#qtyIn", "220")
+    pg.wait_for_timeout(200)
+    pg.click("#confirmAdd")
+    pg.wait_for_timeout(400)
+    pg.click("#fab")
+    pg.fill("#addSearch", "white rice")
+    pg.wait_for_timeout(300)
+    pg.locator("#addResults .row").first.click()
+    pg.wait_for_selector("#sheetPortion:not([hidden])")
+    check("now pre-fills 220 g", pg.input_value("#qtyIn") == "220", pg.input_value("#qtyIn"))
+    pg.click("#sheetPortion [data-close]")
+    pg.wait_for_timeout(300)
 
     print("\n== corrections still work on staples ==")
     pg.click("[data-view='cookbook']")
@@ -134,12 +157,10 @@ with sync_playwright() as pw:
       PANTRY.forEach(b => { if(!b.parts) foods[b.id] = {...b}; });
       const S = JSON.parse(localStorage.getItem('nt.v1'));
       Object.entries(S.edits||{}).forEach(([k,v]) => { if(foods[k]) Object.assign(foods[k], v); });
-      const m = PANTRY.find(b => b.id === 's-rice-chicken-plate');
-      let cal=0; for (const part of m.parts) cal += foods[part.id].cal * part.qty;
-      return Math.round(cal);
+      return Math.round(foods['s-chicken-thigh'].cal * 3.1);
     }""")
-    check("correction flows into the plate", newplate == 923 + round(11 * 3.1),
-          f"got {newplate}, expected {923 + round(11 * 3.1)}")
+    check("correction applies to gram staples", newplate == round(220 * 3.1),
+          f"got {newplate}, expected {round(220 * 3.1)}")
     pg.click("[data-view='cookbook']")
     pg.fill("#cbSearch", "chicken thigh")
     pg.wait_for_timeout(300)
@@ -153,9 +174,9 @@ with sync_playwright() as pw:
     print("\n== persistence ==")
     pg.reload(wait_until="networkidle")
     pg.wait_for_timeout(600)
-    check("entries survived", pg.locator(".entry").count() == 3)
+    check("entries survived", pg.locator(".entry").count() == 4)
     check("gram label survived", pg.locator(".entry .e-sub").first.inner_text().startswith("150 g"))
-    check("total survived", int(pg.inner_text("#kcalEaten")) == 923)
+    check("total survived", int(pg.inner_text("#kcalEaten")) == 923 + 286)
 
     ctx.close(); b.close()
 

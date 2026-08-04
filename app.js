@@ -162,6 +162,15 @@ function findFood(id) { return foodList().find(f => f.id === id); }
 /* The shortlist is earned: anything logged once joins it automatically.
    Explicit marks let you pin something you have not eaten yet, or hide
    something you tried and did not like. */
+/* Only the foods explicitly set up for Mohit start in the shortlist. The wider
+   staple library stays one search away so "My foods" does not become a wall. */
+const STARTER = new Set([
+  "s-rice-white", "s-chicken-thigh", "s-sauce-addon", "s-olive-oil", "s-bouillon",
+  "p-dkb-white-bun", "p-deli-turkey", "p-deli-ham", "p-ayoh-dill",
+  "p-kraft-single", "p-popcorners-kettle", "p-bero-shandy",
+  "p-sandwich-meal",
+]);
+
 function isPantry(id) {
   return typeof PANTRY !== "undefined" && PANTRY.some(b => b.id === id);
 }
@@ -169,7 +178,7 @@ function inRotation(id) {
   if (S.marks[id] === "skip") return false;
   if (S.marks[id] === "rotation") return true;
   if ((S.usage[id]?.n || 0) > 0) return true;
-  return isPantry(id);   // everyday staples start in your list
+  return STARTER.has(id);   // your everyday items start in the list
 }
 function rotationList() {
   return foodList()
@@ -183,10 +192,11 @@ function rotationList() {
              || ub.n - ua.n || a.n.localeCompare(b.n);
     });
 }
-function noteUsage(id) {
+function noteUsage(id, qty) {
   const u = S.usage[id] || (S.usage[id] = { n: 0, last: "" });
   u.n += 1;
   u.last = curDate;
+  if (qty != null) u.q = qty;   // remember the portion for next time
   if (S.marks[id] === "want" || S.marks[id] === "skip") delete S.marks[id];
 }
 
@@ -294,7 +304,7 @@ const SORTS = [["name", "A-Z"], ["ctp", "Best protein ratio"], ["cal", "Fewest c
 function statusOf(id) {
   if (S.marks[id] === "skip") return "skip";
   if ((S.usage[id]?.n || 0) > 0) return "eaten";
-  if (S.marks[id] === "rotation" || isPantry(id)) return "rotation";
+  if (S.marks[id] === "rotation" || STARTER.has(id)) return "rotation";
   if (S.marks[id] === "want") return "want";
   return "new";
 }
@@ -622,7 +632,11 @@ function openPortion(id) {
   portionFood = findFood(id);
   if (!portionFood) return;
   const m = inputMode(portionFood);
-  portionQty = m ? (m.key === "g" ? 1.5 : 8) : 1;   // 150 g / 80 cal defaults
+  // Portions vary day to day, so start from what you used last time for this
+  // food rather than a fixed default.
+  const last = S.usage[id]?.q;
+  if (last) portionQty = last;
+  else portionQty = m ? (m.key === "g" ? 1.5 : 8) : 1;   // 150 g / 80 cal
   renderPortion();
   openSheet("sheetPortion");
 }
@@ -636,7 +650,8 @@ function renderPortion() {
 
   const head = m
     ? `<p class="hint">${f.per100
-        ? `Per 100 g: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f`
+        ? `Per 100 g: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${
+            S.usage[f.id]?.q ? ". Pre-filled with your last portion." : ""}`
         : `Enter the calories from the label or your best estimate. Macros are split as a typical sauce.`}</p>`
     : `<p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>`;
 
@@ -685,7 +700,7 @@ function commitAdd() {
     cal: round(f.cal * q), p: round(f.p * q, 1), c: round(f.c * q, 1), f: round(f.f * q, 1),
     src: f.src,
   });
-  noteUsage(f.id);
+  noteUsage(f.id, round(q, 3));
   save(); closeSheets(); go("today"); renderToday();
   toast(`Added to ${pendingMeal.toLowerCase()}`);
 }

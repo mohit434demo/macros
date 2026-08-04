@@ -33,7 +33,10 @@ with sync_playwright() as pw:
     pg.click("#fab")
     pg.wait_for_selector("#sheetAdd:not([hidden])")
     scope = pg.inner_text("#addScope")
-    check("shortlist has every pantry item", f"My foods ({NP})" in scope, scope)
+    import re as _re
+    NSTART = int(_re.search(r"My foods \((\d+)\)", scope).group(1))
+    check("shortlist is the starter set, not the whole library",
+          0 < NSTART < NP, f"starter={NSTART} pantry={NP}")
     check("everything shows the full count", f"Everything ({TOTAL})" in scope, scope)
     check("defaults to my foods",
           "on" in (pg.locator("#addScope .chip").first.get_attribute("class") or ""))

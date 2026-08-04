@@ -42,10 +42,19 @@ Weigh **after** cooking to use these values.
 **Sandwich Meal** (546 cal, 48 g protein): 5.5 oz deli meat split evenly, 1 bun,
 half a tablespoon of Ayoh, 1 cheese slice, 1 bag of PopCorners.
 
-**Rice & Chicken Thigh Plate** (923 cal, 85 g protein): 150 g cooked white rice,
-310 g cooked chicken thigh, 80 cal of marinade.
+Derived from its parts, so correcting a component updates the meal.
 
-Both derive from their parts, so correcting a component updates the meal.
+There is deliberately no saved rice-and-chicken plate: those portions change
+day to day, so the app instead remembers the last gram amount used for each
+staple and pre-fills it.
+
+## Accuracy stance
+
+The user's guidance is that a well-educated estimate is acceptable. Gram
+staples come from USDA SR Legacy where checked (rice and chicken were verified
+directly); the rest of the library uses standard reference values for common
+preparations. Everything is correctable in-app, so a wrong value is a
+15-second fix rather than a redeploy.
 
 ## Items to double check against a package
 
