@@ -9,6 +9,7 @@ Write-Host "Rebuilding recipe bundle..."
 Push-Location "$src\build"
 $env:PYTHONIOENCODING = "utf-8"
 python bundle.py
+python pantrymatch.py | Select-Object -First 6
 Pop-Location
 
 Write-Host "Syncing to $deploy..."

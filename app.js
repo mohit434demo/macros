@@ -12,7 +12,8 @@ const DEFAULTS = {
   measures: {},   // "YYYY-MM-DD" -> {w: lb, waist: in}
   water: {},      // "YYYY-MM-DD" -> ounces
   custom: [],     // [{id,n,cal,p,c,f,unit,parts?}]
-  usage: {},      // foodId -> {n: times logged, last: "YYYY-MM-DD"}
+  pantry: null,   // [pantryItemId] the user has; null = staples only
+  usage: {},      // foodId -> {n: times logged, last: "YYYY-MM-DD", q: last portion}
   marks: {},      // foodId -> "rotation" | "want" | "skip"
   edits: {},      // bundled foodId -> {n?,unit?,cal,p,c,f} user corrections
 };
@@ -31,6 +32,7 @@ function load() {
       measures: parsed.measures || {},
       water:    parsed.water    || {},
       custom:   parsed.custom   || [],
+      pantry:   parsed.pantry   || null,
       usage:    parsed.usage    || {},
       marks:    parsed.marks    || {},
       edits:    parsed.edits    || {},
@@ -315,6 +317,69 @@ function addWater(delta) {
   renderWater();
 }
 
+// ---------------------------------------------------------------- pantry match
+/* "What can I make?" Staples are assumed present unless explicitly unchecked,
+   so the answer reflects the ingredients you actually have to shop for. */
+const PM = typeof PANTRY_ITEMS !== "undefined" ? PANTRY_ITEMS : [];
+const NEEDS = typeof RECIPE_NEEDS !== "undefined" ? RECIPE_NEEDS : {};
+const PM_BY = new Map(PM.map(i => [i.id, i]));
+const PM_GROUPS = ["Protein", "Produce", "Dairy", "Carbs", "Sauces", "Seasonings"];
+
+function haveSet() {
+  // default: every staple, nothing else
+  if (!S.pantry) return new Set(PM.filter(i => i.s).map(i => i.id));
+  return new Set(S.pantry);
+}
+
+function missingFor(recipeId, have) {
+  const need = NEEDS[recipeId];
+  if (!need) return null;                       // no ingredient data
+  return need.filter(id => !have.has(id));
+}
+
+function pantryRanked() {
+  const have = haveSet();
+  const out = [];
+  for (const r of RECIPES) {
+    const miss = missingFor(r.id, have);
+    if (miss === null) continue;
+    out.push({ r, miss });
+  }
+  out.sort((a, b) => a.miss.length - b.miss.length ||
+                     (a.r.ctp ?? 99) - (b.r.ctp ?? 99) ||
+                     a.r.n.localeCompare(b.r.n));
+  return out;
+}
+
+function pantryLabel(ids) {
+  return ids.map(id => (PM_BY.get(id)?.n || id)).join(", ");
+}
+
+function renderPantrySheet() {
+  const have = haveSet();
+  const groups = {};
+  for (const i of PM) (groups[i.g] = groups[i.g] || []).push(i);
+  $("#pantryGroups").innerHTML = PM_GROUPS.filter(g => groups[g]).map(g => `
+    <h3>${g}${g === "Seasonings" ? " <small>(assumed)</small>" : ""}</h3>
+    <div class="pgrid">${groups[g].map(i => `
+      <button class="pchip ${have.has(i.id) ? "on" : ""}" data-pitem="${esc(i.id)}">${esc(i.n)}</button>
+    `).join("")}</div>`).join("");
+}
+
+function openPantrySheet() {
+  if (!S.pantry) S.pantry = PM.filter(i => i.s).map(i => i.id);
+  renderPantrySheet();
+  openSheet("sheetPantry");
+}
+
+function pantryStats() {
+  const have = haveSet();
+  return {
+    have,
+    picked: [...have].filter(id => !PM_BY.get(id)?.s).length,
+  };
+}
+
 // ---------------------------------------------------------------- COOKBOOK
 let cbTag = "all";
 let cbSort = "name";
@@ -345,10 +410,18 @@ const STATUS_PILL = {
 };
 
 function renderCookbook() {
+  const stats = pantryStats();
+  $("#pantryCount").textContent = stats.picked ? `(${stats.picked} items)` : "";
+  $("#pantryBtn").classList.toggle("on", cbTag === "canmake");
+
+  if (cbTag === "canmake") return renderCanMake();
+
   $("#cbChips").innerHTML = TAGS.map(t =>
     `<button class="chip ${t === cbTag ? "on" : ""}" data-tag="${t}">${TAG_LABEL[t] || t[0].toUpperCase() + t.slice(1)}</button>`).join("");
   $("#cbSort").innerHTML = SORTS.map(([k, l]) =>
     `<button class="chip ${k === cbSort ? "on" : ""}" data-sort="${k}">${l}</button>`).join("");
+  $("#cbSort").hidden = false;
+  $("#cbChips").hidden = false;
 
   let list = foodList();
   if (cbTag === "rotation")      list = list.filter(f => inRotation(f.id));
@@ -378,6 +451,56 @@ function renderCookbook() {
       <span class="badge ${f.ctp && f.ctp <= 11 ? "good" : ""}">${f.ctp ?? "-"}</span>
     </button>`;
   }).join("") : `<p class="empty">Nothing matches that.</p>`;
+}
+
+/* Ranked "what can I make" view: recipes grouped by how many ingredients you
+   are short. The missing-one bucket doubles as a one-item shopping list. */
+function renderCanMake() {
+  $("#cbChips").hidden = true;
+  $("#cbSort").hidden = true;
+
+  const q = $("#cbSearch").value.trim().toLowerCase();
+  let ranked = pantryRanked();
+  if (q) ranked = ranked.filter(x => x.r.n.toLowerCase().includes(q));
+
+  const buckets = [
+    [0, "Ready to cook", "Everything except seasonings is in your kitchen."],
+    [1, "Missing one thing", "Grab one item and these are on."],
+    [2, "Missing two things", ""],
+  ];
+
+  const stats = pantryStats();
+  let html = "";
+  if (!stats.picked) {
+    html += `<p class="hint legend-hint">You have not ticked anything yet, so this is showing what you could make with seasonings alone. Tap the button above to add what is in your kitchen.</p>`;
+  }
+
+  let shown = 0;
+  for (const [n, title, blurb] of buckets) {
+    const set = ranked.filter(x => x.miss.length === n);
+    if (!set.length) continue;
+    shown += set.length;
+    html += `<div class="bucket"><div class="bucket-head"><strong>${title}</strong><em>${set.length}</em></div>` +
+      (blurb ? `<p class="hint legend-hint">${blurb}</p>` : "") +
+      set.map(({ r, miss }) => `
+        <button class="row" data-food="${esc(r.id)}">
+          <span class="r-main">
+            <span class="r-name">${esc(r.n)}</span>
+            <span class="r-sub">${r.cal} cal &middot; ${r.p}p ${r.c}c ${r.f}f</span>
+            ${miss.length ? `<span class="pill want">Need ${esc(pantryLabel(miss))}</span>` : ""}
+          </span>
+          <span class="badge ${r.ctp && r.ctp <= 11 ? "good" : ""}">${r.ctp ?? "-"}</span>
+        </button>`).join("") + `</div>`;
+  }
+
+  const more = ranked.filter(x => x.miss.length > 2).length;
+  if (!shown) {
+    html += `<p class="empty">Nothing within two ingredients yet.<br>Tick a few more things you have.</p>`;
+  } else if (more) {
+    html += `<p class="fine-print">${more} more recipes need three or more ingredients you do not have.</p>`;
+  }
+  $("#cbCount").textContent = "";
+  $("#cbList").innerHTML = html;
 }
 
 // ---------------------------------------------------------------- PROGRESS
@@ -994,10 +1117,17 @@ function setDate(k) {
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit],[data-water]");
+  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit],[data-water],[data-pitem]");
   if (!el) return;
   const d = el.dataset;
 
+  if (d.pitem) {
+    if (!S.pantry) S.pantry = PM.filter(i => i.s).map(i => i.id);
+    const i = S.pantry.indexOf(d.pitem);
+    if (i >= 0) S.pantry.splice(i, 1); else S.pantry.push(d.pitem);
+    save(); renderPantrySheet();
+    return;
+  }
   if (d.water) return addWater(Number(d.water));
   if (d.view) return go(d.view);
   if (d.close !== undefined) return closeSheets();
@@ -1099,7 +1229,9 @@ document.addEventListener("input", ev => {
 });
 
 document.addEventListener("click", ev => {
-  const id = ev.target.id;
+  // resolve to the button so clicks on inner spans still match
+  const btn = ev.target.closest("button");
+  const id = (btn && btn.id) || ev.target.id;
   if (id === "confirmAdd") return commitAdd();
   if (id === "viewRecipe") { closeSheets(); return openRecipe(portionFood.id); }
   if (id === "dateBack") return setDate(shiftKey(curDate, -1));
@@ -1141,6 +1273,20 @@ document.addEventListener("click", ev => {
       sex: "m", act: +$("#pAct").value || 1.375,
     };
     save(); return recalcTargets();
+  }
+  if (id === "pantryBtn") {
+    if (cbTag === "canmake") { cbTag = "all"; return renderCookbook(); }
+    return openPantrySheet();
+  }
+  if (id === "pantryApply") {
+    cbTag = "canmake";
+    closeSheets(); go("cookbook");
+    return;
+  }
+  if (id === "pantryClear") {
+    S.pantry = PM.filter(i => i.s).map(i => i.id);
+    save(); renderPantrySheet(); toast("Reset to seasonings only");
+    return;
   }
   if (id === "addCustom") return openCustom();
   if (id === "addPart") return openPartPicker();
@@ -1201,7 +1347,7 @@ $("#importFile").addEventListener("change", ev => {
         profile: Object.assign({}, DEFAULTS.profile, d.profile),
         log: d.log || {}, measures: d.measures || {}, custom: d.custom || [],
         water: d.water || {}, usage: d.usage || {}, marks: d.marks || {},
-        edits: d.edits || {},
+        edits: d.edits || {}, pantry: d.pantry || null,
       };
       save(); go("today"); toast("Data imported");
     } catch (e) { toast("That file could not be read"); }

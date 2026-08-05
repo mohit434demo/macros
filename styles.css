@@ -298,6 +298,36 @@ label.block { display: grid; gap: 4px; margin-bottom: 8px; }
 .mini { opacity: 0.7; }
 
 .src-line { text-align: left; margin: -4px 0 10px; color: var(--cp-text-soft); }
+
+/* ---------- what can I make ---------- */
+.pantry-cta {
+  margin: 0 0 10px; display: flex; align-items: center; justify-content: center;
+  gap: 6px; border-color: var(--cp-accent); color: var(--cp-accent);
+}
+.pantry-cta.on { background: var(--cp-accent); color: var(--cp-accent-fg); }
+.pantry-cta span { font-weight: 500; opacity: 0.8; font-size: 0.8rem; }
+
+.pgrid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pchip {
+  border: 1px solid var(--cp-border); background: var(--cp-surface);
+  color: var(--cp-text-muted); border-radius: 999px; padding: 7px 12px;
+  font: inherit; font-size: 0.78rem; cursor: pointer;
+}
+.pchip.on {
+  background: var(--cp-accent); color: var(--cp-accent-fg);
+  border-color: var(--cp-accent); font-weight: 600;
+}
+#pantryGroups h3 { margin: 14px 0 7px; }
+#pantryGroups h3 small { font-weight: 400; color: var(--cp-text-soft); font-size: 0.72rem; }
+
+.bucket { margin-bottom: 16px; }
+.bucket-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 0 4px 6px;
+}
+.bucket-head strong { font-size: 0.95rem; }
+.bucket-head em { font-style: normal; font-size: 0.78rem; color: var(--cp-text-muted); }
+.bucket .row { margin-bottom: 6px; }
 .blurb {
   font-size: 0.83rem; color: var(--cp-text-muted); font-style: italic;
   border-left: 2px solid var(--cp-border); padding-left: 10px; margin: 14px 0 4px;

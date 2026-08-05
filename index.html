@@ -82,6 +82,7 @@
 
   <!-- ================= COOKBOOK ================= -->
   <section id="view-cookbook" class="view" hidden>
+    <button id="pantryBtn" class="btn pantry-cta full">What can I make? <span id="pantryCount"></span></button>
     <div class="search-row">
       <input id="cbSearch" type="search" placeholder="Search 70 recipes..." autocomplete="off">
     </div>
@@ -272,10 +273,24 @@
   </div>
 </div>
 
+<div id="sheetPantry" class="sheet tall" hidden>
+  <div class="sheet-head">
+    <button class="link" data-close>Close</button>
+    <strong>What's in your kitchen</strong>
+    <button class="link" id="pantryClear">Clear</button>
+  </div>
+  <div class="sheet-body">
+    <p class="hint">Tick what you have. Seasonings and oils are assumed, but uncheck anything you are out of.</p>
+    <div id="pantryGroups"></div>
+    <button class="btn primary full" id="pantryApply">Show me what I can make</button>
+  </div>
+</div>
+
 <div id="toast" class="toast" hidden></div>
 
 <script src="recipes.js"></script>
 <script src="pantry.js"></script>
+<script src="pantrymatch.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

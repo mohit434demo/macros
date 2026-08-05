@@ -20,6 +20,10 @@ estimate.
   snacks) plus saved meals that combine them. Meal macros are derived from
   their components, so correcting one component updates every meal using it.
   Any bundled value can be corrected on-device without a redeploy.
+- **What can I make?** - tick what is in your kitchen and the cookbook re-ranks
+  into Ready to cook / Missing one thing / Missing two things, naming the gaps.
+  Seasonings and oils are assumed present but can be unchecked. The
+  missing-one bucket doubles as a one-item shopping list.
 - **Cookbook** - 120 recipes from two sources, each with full ingredients and
   instructions. The 70 Stealth Health recipes link to the original publisher
   PDF and, where available, the recipe video. The 50 Joe x Fitness recipes are
@@ -43,6 +47,7 @@ contains no personal data. Use **More > Export data** to back up.
 python build/extract.py      # parse Stealth Health PDFs -> data/recipes.json
 python build/extract_joe.py  # parse the Joe x Fitness cookbook -> data/joe_recipes.json
 python build/bundle.py       # merge both -> site/recipes.js
+python build/pantrymatch.py  # map ingredients to pantry items -> site/pantrymatch.js
 python build/icons.py        # regenerate app icons
 python build/test_app.py     # end-to-end browser tests (needs local server)
 ```

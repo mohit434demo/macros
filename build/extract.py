@@ -27,6 +27,7 @@ RE_INLINE = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*(?=[A-Za-z])")
 NOISE = re.compile(
     r"^(ingredients?|instructions?|directions?|toppings?|per serving.*|grocery list.*|"
     r"watch recipe video|instructions begin on next page|use while shopping|"
+    r"ingredient list.*|per .{0,20}: ?makes.*|additional recipe notes.*|"
     r"back to table of contents.*|tom walsh|meals|\(meal prep weekly.*\)|"
     r"stealth health|slow cooker cookbook|\d+)\s*$", re.I)
 
@@ -119,6 +120,41 @@ def macro_groups(sp_list):
     return groups
 
 
+RE_QTY = re.compile(
+    r"(^\s*[\d\u00bc-\u00be\u2150-\u215e]|"                      # starts with a number/fraction
+    r"\b\d+\s*(g|kg|oz|lb|lbs|ml|l)\b|"                          # 400g, 14oz
+    r"\b(tbsp|tsp|tablespoons?|teaspoons?|cups?|cloves?|cans?|"
+    r"jars?|packages?|bunch(es)?|slices?|handful|dash|pinch|"
+    r"sprigs?|heads?|stalks?|leaves|sheets?|scoops?|sticks?)\b)", re.I)
+
+RE_PROSE = re.compile(
+    r"\b(add|stir|cook|serve|store|reheat|mix|divide|transfer|place|remove|repeat|"
+    r"enjoy|shred|pour|heat|bake|microwave|freeze|cool|wrap|garnish|top it|let the|"
+    r"leftovers|until|before|after|during|so that|make sure|be sure|note:|tip:|"
+    r"you can|if you|this is|which|resulting)\b", re.I)
+
+
+def is_ingredient(line):
+    """Ingredient lines are short and quantity-led; trailing storage and
+    reheating notes are full sentences. Keep them apart so the ingredient
+    list stays usable for pantry matching."""
+    t = line.strip()
+    if not t:
+        return False
+    if SECTION_HDR.match(t) or t.endswith(":"):
+        return True
+    words = t.split()
+    has_qty = bool(RE_QTY.search(t))
+    # sentence fragments left over from wrapped prose ("containers.", "eat.")
+    if t.endswith(".") and not has_qty and not re.search(r"\d", t):
+        return False
+    if has_qty and len(words) <= 16 and not (len(words) > 9 and RE_PROSE.search(t)):
+        return True
+    if len(words) <= 6 and not RE_PROSE.search(t) and len(t) >= 4:
+        return True
+    return False
+
+
 def parse_body(lines):
     """Split lines into (ingredients, steps), handling both numbering styles."""
     lines = [l for l in lines if not NOISE.match(l) and not RE_MACROISH.search(l)]
@@ -135,7 +171,15 @@ def parse_body(lines):
                     buf = []
             else:
                 buf.append(l)
-        ingr = buf
+        # everything after the final marker: ingredients plus trailing notes
+        tail_ingr, tail_prose = [], []
+        for l in buf:
+            (tail_ingr if is_ingredient(l) else tail_prose).append(l)
+        ingr = tail_ingr
+        if tail_prose and steps:
+            steps[-1] = steps[-1].rstrip() + " " + " ".join(tail_prose)
+        elif tail_prose:
+            steps.append(" ".join(tail_prose))
         if steps:
             first = steps[0]
             m = re.search(r"(?:^|\s)((?:Add|Dice|Cook|Preheat|In a|Combine|Mix|Heat|Place|"
@@ -157,7 +201,7 @@ def parse_body(lines):
         if buf:
             steps.append(buf)
 
-    ingr = [i for i in ingr if 2 < len(i) < 120]
+    ingr = [i for i in ingr if 2 < len(i) < 120 and is_ingredient(i)]
     steps = [s for s in steps if len(s) > 15]
     return ingr, steps
 
@@ -251,6 +295,41 @@ for pdf in sorted(SRC.glob("*.pdf")):
         lines = [s["t"] for s in reading_order(body_spans, pg["w"])]
         ingr, steps = parse_body(lines)
 
+        if not ingr:
+            # Dense "print" layouts interleave ingredients with recipe notes, so the
+            # column walk hands them to the step buffer. Recover quantity-led lines
+            # that are not already part of a step.
+            joined = " ".join(steps)
+            seen_i = set()
+            for l in lines:
+                if NOISE.match(l) or RE_MACROISH.search(l) or RE_MARKER.match(l):
+                    continue
+                if not RE_QTY.search(l) or not is_ingredient(l):
+                    continue
+                if l in joined or l.lower() in seen_i:
+                    continue
+                seen_i.add(l.lower())
+                ingr.append(l)
+
+        if len([x for x in ingr if not x.rstrip().endswith(":")]) < 4:
+            # Most of these PDFs also carry a "Grocery list - use while shopping"
+            # page: a clean, categorised ingredient list. It is the better source
+            # whenever the recipe page itself did not yield much.
+            for gp in pages:
+                if not re.search(r"grocery list", gp["text"], re.I):
+                    continue
+                got = []
+                for s in reading_order(gp["spans"], gp["w"]):
+                    t = s["t"]
+                    if NOISE.match(t) or RE_MACROISH.search(t) or RE_SERV.search(t):
+                        continue
+                    if s["size"] >= 18 or len(t) < 3:
+                        continue
+                    got.append(t)
+                if len(got) > len(ingr):
+                    ingr = got
+                break
+
         title = (page_title(pg["spans"]) if multi else doc_title) or subject
         if RE_MACROISH.search(title or ""):
             title = subject
@@ -259,32 +338,46 @@ for pdf in sorted(SRC.glob("*.pdf")):
                     "ingredients": ingr, "steps": steps,
                     "source": pdf.name, "video": video, "meta": meta})
 
-# ---- de-duplicate: same macros + servings == same dish across template variants
+# ---- de-duplicate: same macros + servings == same dish across template variants.
+# Variants differ in quality: the "recipe card" usually has clean ingredients while
+# the "detailed"/"print" version has better steps. Take the best of each.
 best = {}
 for r in raw:
     key = (r["calories"], r["protein"], r["carbs"], r["fat"], r["servings"])
-    score = len(r["steps"]) * 10 + len(r["ingredients"])
     prev = best.get(key)
     if prev is None:
-        best[key] = (score, r)
+        best[key] = r
         continue
-    keep, drop = (r, prev[1]) if score > prev[0] else (prev[1], r)
-    if len(drop["name"]) > len(keep["name"]):
-        keep["name"] = drop["name"]
-    # the recipe-card variant often carries the video link, the detailed one the steps
-    keep["video"] = keep.get("video") or drop.get("video")
-    if not keep.get("meta", {}).get("url") and drop.get("meta", {}).get("url"):
-        keep["meta"] = drop["meta"]
-    best[key] = (max(score, prev[0]), keep)
+    keep = prev
+    if len(r["steps"]) > len(keep["steps"]):
+        keep = dict(keep, steps=r["steps"])
+    if len(r["ingredients"]) > len(keep["ingredients"]):
+        keep = dict(keep, ingredients=r["ingredients"])
+    if len(r["name"]) > len(keep["name"]):
+        keep = dict(keep, name=r["name"])
+    keep["video"] = keep.get("video") or r.get("video")
+    if not keep.get("meta", {}).get("url") and r.get("meta", {}).get("url"):
+        keep["meta"] = r["meta"]
+    best[key] = keep
 
 recipes = []
-for _, r in best.values():
+for r in best.values():
     m = r.pop("meta", {})
     name = re.sub(r"\s+", " ", r["name"]).strip().title()
     name = name.replace("Bbq", "BBQ").replace("Mpw", "").replace(" N ", " N' ")
     name = re.sub(r"\s+", " ", name).strip(" -:")
     r["name"] = name
     r["id"] = slug(name)[:60]
+    # drop headings that survived as ingredient lines (the dish title, serving
+    # captions) so the list is purely things you would shop for
+    low = name.lower()
+    r["ingredients"] = [
+        i for i in r["ingredients"]
+        if i.lower().strip(" :") != low
+        and not RE_SERV.search(i)
+        and not NOISE.match(i)
+        and not RE_MACROISH.search(i)
+    ]
     r["edition"] = m.get("edition")
     r["date"] = m.get("date")
     r["pdf"] = m.get("url")
