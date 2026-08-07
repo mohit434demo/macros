@@ -111,13 +111,13 @@ function simpleFoods() {
     if (b.parts && b.parts.length) continue;
     out.push({ id: b.id, n: b.n, cal: b.cal, p: b.p, c: b.c, f: b.f,
                unit: b.unit || "serving", tags: b.tags || ["pantry"], src: "pantry",
-               per100: !!b.per100, freeCal: !!b.freeCal });
+               per100: !!b.per100, freeCal: !!b.freeCal, gw: b.gw });
   }
   for (const c of S.custom) {
     if (c.parts && c.parts.length) continue;
     out.push({ id: c.id, n: c.n, cal: c.cal, p: c.p, c: c.c, f: c.f,
                unit: c.unit || "serving", tags: ["mine"], src: "custom",
-               per100: !!c.per100, freeCal: !!c.freeCal });
+               per100: !!c.per100, freeCal: !!c.freeCal, gw: c.gw });
   }
   // user corrections win over bundled values
   return out.map(f => {
@@ -196,11 +196,12 @@ function rotationList() {
              || ub.n - ua.n || a.n.localeCompare(b.n);
     });
 }
-function noteUsage(id, qty) {
+function noteUsage(id, qty, unit) {
   const u = S.usage[id] || (S.usage[id] = { n: 0, last: "" });
   u.n += 1;
   u.last = curDate;
   if (qty != null) u.q = qty;   // remember the portion for next time
+  if (unit) u.u = unit;         // and which unit you entered it in
   if (S.marks[id] === "want" || S.marks[id] === "skip") delete S.marks[id];
 }
 
@@ -764,12 +765,32 @@ let portionFood = null, portionQty = 1;
 
 /* Gram staples and free-calorie add-ons are entered in their natural unit
    (grams, calories) rather than as a serving multiplier. Internally everything
-   is still a multiplier of the base row, so the log format never changes. */
+   is still a multiplier of the base row, so the log format never changes.
+
+   A food that declares a serving weight (gw) can be entered either way: pick
+   "grams", type what the scale said, and the division happens here. */
+function gramWeight(f) {
+  if (f.per100) return 100;
+  const n = Number(f.gw);
+  return n > 0 ? n : 0;
+}
+function canWeigh(f) {
+  return !f.per100 && !f.freeCal && gramWeight(f) > 0;
+}
+let portionUnit = null;   // "g" | "serving" while a portion sheet is open
+
 function inputMode(f) {
   if (f.per100) return { key: "g", label: "grams", step: 10, per: 100,
                          chips: [100, 150, 200, 250, 300] };
   if (f.freeCal) return { key: "cal", label: "calories", step: 10, per: f.cal || 10,
                           chips: [40, 80, 120, 200] };
+  if (canWeigh(f) && portionUnit === "g") {
+    const w = gramWeight(f);
+    const step = w >= 80 ? 10 : 5;
+    const chips = [1, 1.5, 2].map(k => Math.round(w * k / step) * step);
+    return { key: "g", label: "grams", step, per: w,
+             chips: [...new Set([Math.round(w), ...chips])].sort((a, b) => a - b) };
+  }
   return null;
 }
 function qtyToInput(f, q) {
@@ -784,12 +805,15 @@ function inputToQty(f, v) {
 function openPortion(id) {
   portionFood = findFood(id);
   if (!portionFood) return;
+  // reopen in whichever unit you used last for this food
+  const u = S.usage[id]?.u;
+  portionUnit = canWeigh(portionFood) ? (u === "g" ? "g" : "serving") : null;
   const m = inputMode(portionFood);
   // Portions vary day to day, so start from what you used last time for this
   // food rather than a fixed default.
   const last = S.usage[id]?.q;
   if (last) portionQty = last;
-  else portionQty = m ? (m.key === "g" ? 1.5 : 8) : 1;   // 150 g / 80 cal
+  else portionQty = m ? (m.key === "g" ? (portionFood.per100 ? 1.5 : 1) : 8) : 1;
   renderPortion();
   openSheet("sheetPortion");
 }
@@ -801,14 +825,26 @@ function renderPortion() {
   const partsNote = f.parts && f.parts.length
     ? `<p class="hint">Contains ${f.parts.length} item${f.parts.length > 1 ? "s" : ""}.</p>` : "";
 
+  const w = gramWeight(f);
   const head = m
     ? `<p class="hint">${f.per100
         ? `Per 100 g: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${
             S.usage[f.id]?.q ? ". Pre-filled with your last portion." : ""}`
-        : `Enter the calories from the label or your best estimate. Macros are split as a typical sauce.`}</p>`
-    : `<p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${f.sv ? `. Recipe makes ${f.sv}.` : ""}</p>`;
+        : f.freeCal
+          ? `Enter the calories from the label or your best estimate. Macros are split as a typical sauce.`
+          : `One ${esc(f.unit)} is ${w} g: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f. Type what your scale says.`}</p>`
+    : `<p class="hint">Per ${esc(f.unit)}: ${f.cal} cal, ${f.p}p ${f.c}c ${f.f}f${
+        f.sv ? `. Recipe makes ${f.sv}.` : ""}${
+        canWeigh(f) ? ` One ${esc(f.unit)} is ${w} g.` : ""}</p>`;
 
-  const shown = m ? qtyToInput(f, q) : q;
+  // foods that know their serving weight can be entered either way
+  const unitToggle = canWeigh(f) ? `
+    <div class="seg unit-seg">
+      <button class="${portionUnit !== "g" ? "on" : ""}" data-punit="serving">${esc(f.unit)}s</button>
+      <button class="${portionUnit === "g" ? "on" : ""}" data-punit="g">grams</button>
+    </div>` : "";
+
+  const shown = m ? qtyToInput(f, q) : round(q, 2);
   const chips = m
     ? m.chips.map(v => `<button class="chip ${v === shown ? "on" : ""}" data-setq="${inputToQty(f, v)}">${v}${m.key === "g" ? "g" : " cal"}</button>`).join("")
     : [0.5, 1, 1.5, 2].map(v => `<button class="chip ${v === q ? "on" : ""}" data-setq="${v}">${v}x</button>`).join("");
@@ -819,6 +855,7 @@ function renderPortion() {
     ${partsNote}
     ${partPicker ? "" : `<div class="seg">${MEALS.map(x =>
       `<button class="${x === pendingMeal ? "on" : ""}" data-meal="${x}">${x}</button>`).join("")}</div>`}
+    ${unitToggle}
     <div class="qty-row">
       <button data-q="-">&minus;</button>
       <span class="qty-wrap">
@@ -853,7 +890,7 @@ function commitAdd() {
     cal: round(f.cal * q), p: round(f.p * q, 1), c: round(f.c * q, 1), f: round(f.f * q, 1),
     src: f.src,
   });
-  noteUsage(f.id, round(q, 3));
+  noteUsage(f.id, round(q, 3), portionUnit === "g" ? "g" : (canWeigh(f) ? "serving" : null));
   save(); closeSheets(); go("today"); renderToday();
   toast(`Added to ${pendingMeal.toLowerCase()}`);
 }
@@ -953,6 +990,11 @@ function openEditFood(id) {
       <label>Carbs (g) <input id="eC" type="number" inputmode="decimal" value="${f.c}"></label>
       <label>Fat (g) <input id="eF" type="number" inputmode="decimal" value="${f.f}"></label>
     </div>
+    ${f.per100 || f.freeCal ? "" : `
+      <label class="block">Serving weight in grams (optional)
+        <input id="eGw" type="number" inputmode="decimal" placeholder="e.g. 112" value="${f.gw ?? ""}">
+      </label>
+      <p class="hint">Add this and you can log the food in grams instead of servings.</p>`}
     <button class="btn primary full" data-saveedit="${esc(id)}">Save correction</button>
     ${Object.keys(e).length ? `<button class="btn full" data-resetedit="${esc(id)}">Reset to built-in values</button>` : ""}`;
   openSheet("sheetCustom");
@@ -969,8 +1011,8 @@ function openCustom(id) {
   customMode = c && c.parts && c.parts.length ? "meal" : "single";
   customParts = c && c.parts ? c.parts.map(p => ({ ...p })) : [];
   customDraft = c
-    ? { n: c.n, unit: c.unit || "", cal: c.cal, p: c.p, c: c.c, f: c.f }
-    : { n: "", unit: "", cal: "", p: "", c: "", f: "" };
+    ? { n: c.n, unit: c.unit || "", cal: c.cal, p: c.p, c: c.c, f: c.f, gw: c.gw ?? "" }
+    : { n: "", unit: "", cal: "", p: "", c: "", f: "", gw: "" };
   renderCustom();
   openSheet("sheetCustom");
 }
@@ -979,7 +1021,7 @@ function openCustom(id) {
    whatever is typed into the draft first or it would be lost. */
 function syncCustomDraft() {
   const get = sel => { const el = $(sel); return el ? el.value : undefined; };
-  const map = { n: "#cName", unit: "#cUnit", cal: "#cCal", p: "#cP", c: "#cC", f: "#cF" };
+  const map = { n: "#cName", unit: "#cUnit", cal: "#cCal", p: "#cP", c: "#cC", f: "#cF", gw: "#cGw" };
   for (const [k, sel] of Object.entries(map)) {
     const v = get(sel);
     if (v !== undefined) customDraft[k] = v;
@@ -999,7 +1041,11 @@ function renderCustom() {
     <div class="field-row">
       <label>Carbs (g) <input id="cC" type="number" inputmode="decimal" value="${esc(d.c ?? "")}"></label>
       <label>Fat (g) <input id="cF" type="number" inputmode="decimal" value="${esc(d.f ?? "")}"></label>
-    </div>`;
+    </div>
+    <label class="block">Serving weight in grams (optional)
+      <input id="cGw" type="number" inputmode="decimal" placeholder="e.g. 112" value="${esc(d.gw ?? "")}">
+    </label>
+    <p class="hint">Fill this in if you weigh the food. You can then log it in grams and the app works out the portion for you.</p>`;
 
   const idx = new Map(simpleFoods().map(f => [f.id, f]));
   const t = mealTotals(customParts, idx);
@@ -1117,7 +1163,7 @@ function setDate(k) {
 
 // ---------------------------------------------------------------- events
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit],[data-water],[data-pitem]");
+  const el = ev.target.closest("[data-view],[data-tag],[data-sort],[data-food],[data-pick],[data-meal],[data-setq],[data-q],[data-del],[data-addmeal],[data-delcustom],[data-logthis],[data-close],[data-scope],[data-mark],[data-again],[data-day],[data-cmode],[data-delpart],[data-editcustom],[data-editfood],[data-saveedit],[data-resetedit],[data-water],[data-pitem],[data-punit]");
   if (!el) return;
   const d = el.dataset;
 
@@ -1161,6 +1207,11 @@ document.addEventListener("click", ev => {
     $$("#mealSeg button").forEach(b => b.classList.toggle("on", b.dataset.meal === d.meal));
     return;
   }
+  if (d.punit) {
+    // keep the real amount identical across the switch; only the display unit changes
+    portionUnit = d.punit === "g" ? "g" : "serving";
+    return renderPortion();
+  }
   if (d.setq) { portionQty = Number(d.setq); return renderPortion(); }
   if (d.q) {
     const m = inputMode(portionFood);
@@ -1183,10 +1234,16 @@ document.addEventListener("click", ev => {
   }
   if (d.editfood) { closeSheets(); return openEditFood(d.editfood); }
   if (d.saveedit) {
-    S.edits[d.saveedit] = {
+    const e = {
       cal: +$("#eCal").value || 0, p: +$("#eP").value || 0,
       c: +$("#eC").value || 0, f: +$("#eF").value || 0,
     };
+    const gwEl = $("#eGw");
+    if (gwEl) {
+      const gw = +gwEl.value;
+      if (gw > 0) e.gw = gw;
+    }
+    S.edits[d.saveedit] = e;
     save(); closeSheets(); renderToday(); renderMore(); toast("Corrected");
     return;
   }
@@ -1311,6 +1368,8 @@ document.addEventListener("click", ev => {
         cal: +customDraft.cal || 0, p: +customDraft.p || 0,
         c: +customDraft.c || 0, f: +customDraft.f || 0,
       });
+      const gw = +customDraft.gw;
+      if (gw > 0) rec.gw = gw; else delete rec.gw;
     }
     save(); closeSheets(); renderMore(); renderToday();
     toast(editingCustom ? "Saved" : "Food saved");

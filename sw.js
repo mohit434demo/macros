@@ -1,6 +1,6 @@
 /* Cache-first for the app shell so it opens instantly and works offline.
    Bump CACHE when any shell file changes. */
-const CACHE = "macros-v8";
+const CACHE = "macros-v9";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./recipes.js", "./pantry.js",
   "./pantrymatch.js",

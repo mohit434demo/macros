@@ -392,6 +392,7 @@ label.block { display: grid; gap: 4px; margin-bottom: 8px; }
   border-radius: 8px; cursor: pointer;
 }
 .seg button.on { background: var(--cp-surface); color: var(--cp-text); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.unit-seg { grid-template-columns: 1fr 1fr; margin: 10px 0 0; }
 
 .qty-row { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 14px 0; }
 .qty-row button {

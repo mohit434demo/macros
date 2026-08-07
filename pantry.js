@@ -164,22 +164,22 @@ const PANTRY = [
     cal: 10, p: 0.5, c: 1.1, f: 0.4, tags: ["staple", "addon", "sauce"] },
 
   // ---------------------------------------------------------- packaged
-  { id: "p-dkb-white-bun", n: "Dave's Killer Bread White Bun", unit: "bun",
+  { id: "p-dkb-white-bun", n: "Dave's Killer Bread White Bun", unit: "bun", gw: 62,
     cal: 160, p: 8, c: 30, f: 1.5, tags: ["pantry", "bread"] },
 
-  { id: "p-deli-turkey", n: "Turkey Deli Meat", unit: "3 oz",
+  { id: "p-deli-turkey", n: "Turkey Deli Meat", unit: "3 oz", gw: 85,
     cal: 90, p: 20, c: 2, f: 0.5, tags: ["pantry", "protein"] },
 
-  { id: "p-deli-ham", n: "Ham Deli Meat", unit: "3 oz",
+  { id: "p-deli-ham", n: "Ham Deli Meat", unit: "3 oz", gw: 85,
     cal: 90, p: 18, c: 2, f: 1, tags: ["pantry", "protein"] },
 
-  { id: "p-ayoh-dill", n: "Ayoh Dill Pickle Mayo", unit: "Tbsp",
+  { id: "p-ayoh-dill", n: "Ayoh Dill Pickle Mayo", unit: "Tbsp", gw: 14,
     cal: 60, p: 0, c: 0, f: 7, tags: ["pantry", "condiment"] },
 
-  { id: "p-kraft-single", n: "Kraft American Cheese Slice", unit: "slice",
+  { id: "p-kraft-single", n: "Kraft American Cheese Slice", unit: "slice", gw: 21,
     cal: 60, p: 3, c: 2, f: 4.5, tags: ["pantry", "dairy"] },
 
-  { id: "p-popcorners-kettle", n: "PopCorners Kettle Corn", unit: "1 oz bag",
+  { id: "p-popcorners-kettle", n: "PopCorners Kettle Corn", unit: "1 oz bag", gw: 28,
     cal: 130, p: 2, c: 21, f: 4.5, tags: ["pantry", "snack"] },
 
   { id: "p-bero-shandy", n: "BERO Shandy (non-alc)", unit: "can",
